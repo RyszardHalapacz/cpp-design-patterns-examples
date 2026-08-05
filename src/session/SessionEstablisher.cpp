@@ -5,18 +5,18 @@
 
 namespace patterns::session {
 
-using patterns::services::appLogger;
+using patterns::services::logApp;
 
 void SessionEstablisher::establish() {
-    appLogger().log("[SessionEstablisher] Starting session establishment\n");
+    logApp("[SessionEstablisher] Starting session establishment\n");
     if (!checkPreconditions()) {
-        appLogger().log("[SessionEstablisher] Preconditions not met — aborting\n");
+        logApp("[SessionEstablisher] Preconditions not met — aborting\n");
         return;
     }
     connect();
     configure();
     finalizeSetup();
-    appLogger().log("[SessionEstablisher] Session established\n");
+    logApp("[SessionEstablisher] Session established\n");
 }
 
 EngineSessionEstablisher::EngineSessionEstablisher(SessionManagement& session,
@@ -24,7 +24,7 @@ EngineSessionEstablisher::EngineSessionEstablisher(SessionManagement& session,
     : session_(session), engine_(engine) {}
 
 bool EngineSessionEstablisher::checkPreconditions() {
-    appLogger().log("[EngineSessionEstablisher] Checking engine availability\n");
+    logApp("[EngineSessionEstablisher] Checking engine availability\n");
     return true;
 }
 
@@ -33,7 +33,7 @@ void EngineSessionEstablisher::connect() {
 }
 
 void EngineSessionEstablisher::configure() {
-    appLogger().log("[EngineSessionEstablisher] Default configuration\n");
+    logApp("[EngineSessionEstablisher] Default configuration\n");
 }
 
 void EngineSessionEstablisher::finalizeSetup() {

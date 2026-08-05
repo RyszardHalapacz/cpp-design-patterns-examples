@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 #include <memory>
-#include <stdexcept>
 #include <typeindex>
 
 #include "patterns/services/Logger.hpp"
@@ -62,28 +61,36 @@ TEST(DoSomethingTest, DoPrintsMessage) {
 TEST(ServiceLocatorTest, ProvideAndGetByTemplate) {
     auto loggerPtr = std::make_shared<Logger>();
     ServiceLocator::instance().provide<Logger>(loggerPtr);
-    Logger& retrieved = ServiceLocator::instance().get<Logger>();
-    EXPECT_EQ(&retrieved, loggerPtr.get());
+    auto result = ServiceLocator::instance().tryGet<Logger>();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), loggerPtr.get());
 }
 
-TEST(ServiceLocatorTest, GetThrowsWhenNotRegistered) {
-    // DoSomething may or may not be registered — use a type that definitely won't be:
-    // We can't easily unregister, so skip if already present.
-    // Instead, verify get<> throws on a freshly unregistered path by checking exception type.
-    // Register DoSomething first, then rely on it being there for other tests.
-    // For this test, we just verify the throw for FileLogger if not registered.
-    // Re-provide to reset:
+TEST(ServiceLocatorTest, ProvideAndGetDoSomething) {
     auto ds = std::make_shared<DoSomething>();
     ServiceLocator::instance().provide<DoSomething>(ds);
-    DoSomething& got = ServiceLocator::instance().get<DoSomething>();
-    EXPECT_EQ(&got, ds.get());
+    auto result = ServiceLocator::instance().tryGet<DoSomething>();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), ds.get());
+}
+
+TEST(ServiceLocatorTest, TryGetReturnsUnexpectedWhenNotRegistered) {
+    // FileLogger is not registered in a fresh test run unless provided explicitly.
+    // Remove any existing registration by providing a sentinel, then check a
+    // type that was never registered — use a local helper type if possible.
+    // Since we can't unregister, verify the error code path via provideRuntime
+    // with a null ptr instead.
+    auto result = ServiceLocator::instance().provide<Logger>(nullptr);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ServiceLocatorErrorCode::NullService);
 }
 
 TEST(ServiceLocatorTest, AppLoggerShortcut) {
     auto loggerPtr = std::make_shared<Logger>();
     ServiceLocator::instance().provide<Logger>(loggerPtr);
-    Logger& via_shortcut = appLogger();
-    EXPECT_EQ(&via_shortcut, loggerPtr.get());
+    auto result = appLogger();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), loggerPtr.get());
 }
 
 TEST(ServiceLocatorTest, AppFileLoggerShortcut) {
@@ -91,38 +98,68 @@ TEST(ServiceLocatorTest, AppFileLoggerShortcut) {
     auto flPtr = std::make_shared<FileLogger>("shortcut.log");
     testing::internal::GetCapturedStdout(); // discard constructor output
     ServiceLocator::instance().provide<FileLogger>(flPtr);
-    FileLogger& via_shortcut = appFileLogger();
-    EXPECT_EQ(&via_shortcut, flPtr.get());
+    auto result = appFileLogger();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), flPtr.get());
 }
 
 TEST(ServiceLocatorTest, AppDoSomethingShortcut) {
     auto dsPtr = std::make_shared<DoSomething>();
     ServiceLocator::instance().provide<DoSomething>(dsPtr);
-    DoSomething& via_shortcut = appDoSomething();
-    EXPECT_EQ(&via_shortcut, dsPtr.get());
+    auto result = appDoSomething();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), dsPtr.get());
 }
 
 TEST(ServiceLocatorTest, ProvideRuntimeAndGetRuntime) {
     auto dsPtr = std::make_shared<DoSomething>();
     ServiceLocator::instance().provideRuntime(dsPtr);
-    DoSomething& retrieved = ServiceLocator::instance().getRuntime<DoSomething>();
-    EXPECT_EQ(&retrieved, dsPtr.get());
+    auto result = ServiceLocator::instance().tryGetRuntime<DoSomething>();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), dsPtr.get());
 }
 
 TEST(ServiceLocatorTest, GetRuntimeByTypeIndex) {
     auto dsPtr = std::make_shared<DoSomething>();
     ServiceLocator::instance().provideRuntime(dsPtr);
     auto key = std::type_index(typeid(DoSomething));
-    auto svc = ServiceLocator::instance().getRuntime(key);
-    EXPECT_NE(svc, nullptr);
-    EXPECT_EQ(dynamic_cast<DoSomething*>(svc.get()), dsPtr.get());
+    auto result = ServiceLocator::instance().tryGetRuntime(key);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(dynamic_cast<DoSomething*>(result->get()), dsPtr.get());
 }
 
 TEST(ServiceLocatorTest, AppDoSomethingByPointerShortcut) {
     auto dsPtr = std::make_shared<DoSomething>();
     ServiceLocator::instance().provideRuntime(dsPtr);
-    DoSomething& via_shortcut = appDoSomethingByPointer();
-    EXPECT_EQ(&via_shortcut, dsPtr.get());
+    auto result = appDoSomethingByPointer();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), dsPtr.get());
+}
+
+TEST(ServiceLocatorTest, ProvideRuntimeNullReturnsNullService) {
+    auto result = ServiceLocator::instance().provideRuntime(nullptr);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ServiceLocatorErrorCode::NullService);
+}
+
+TEST(ServiceLocatorTest, TryGetRuntimeUnknownKeyReturnsServiceNotFound) {
+    // Use a dummy local struct whose type_index was never registered.
+    struct NeverRegistered : IService {};
+    auto result = ServiceLocator::instance().tryGetRuntime(std::type_index(typeid(NeverRegistered)));
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ServiceLocatorErrorCode::ServiceNotFound);
+}
+
+TEST(ServiceLocatorTest, LogFileDelegatesToFileLogger) {
+    testing::internal::CaptureStdout();
+    auto flPtr = std::make_shared<FileLogger>("logfile_test.log");
+    testing::internal::GetCapturedStdout();
+    ServiceLocator::instance().provide<FileLogger>(flPtr);
+
+    testing::internal::CaptureStdout();
+    logFile("test-entry");
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("test-entry"), std::string::npos);
 }
 
 TEST(ServiceLocatorTest, OverwriteServiceReturnsNew) {
@@ -130,5 +167,7 @@ TEST(ServiceLocatorTest, OverwriteServiceReturnsNew) {
     auto second = std::make_shared<Logger>();
     ServiceLocator::instance().provide<Logger>(first);
     ServiceLocator::instance().provide<Logger>(second);
-    EXPECT_EQ(&ServiceLocator::instance().get<Logger>(), second.get());
+    auto result = ServiceLocator::instance().tryGet<Logger>();
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(&result->get(), second.get());
 }

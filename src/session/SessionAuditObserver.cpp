@@ -8,40 +8,40 @@ namespace patterns::session {
 using patterns::observer::SessionEvent;
 using patterns::observer::SessionEventType;
 using patterns::strategy::sortStrategyIdName;
-using patterns::services::appLogger;
+using patterns::services::logApp;
 
 SessionAuditObserver::SessionAuditObserver() {
-    appLogger().log("[Audit] Creating audit observer — starting to listen\n");
+    logApp("[Audit] Creating audit observer — starting to listen\n");
 }
 
 SessionAuditObserver::~SessionAuditObserver() {
-    appLogger().log("[Audit] Destructor — releasing audit observer resources\n");
+    logApp("[Audit] Destructor — releasing audit observer resources\n");
 }
 
 void SessionAuditObserver::onSessionEvent(const SessionEvent& event) {
     switch (event.type) {
         case SessionEventType::VectorAdded:
-            appLogger().log("[Audit] Recorded: vector added\n");
+            logApp("[Audit] Recorded: vector added\n");
             break;
 
         case SessionEventType::SortRequested:
-            appLogger().log("[Audit] Recorded: sort requested\n");
+            logApp("[Audit] Recorded: sort requested\n");
             break;
 
         case SessionEventType::PrintRequested:
-            appLogger().log("[Audit] Recorded: print requested\n");
+            logApp("[Audit] Recorded: print requested\n");
             break;
 
         case SessionEventType::StrategyChangeRequested: {
             std::ostringstream oss;
             oss << "[Audit] Recorded: strategy change to "
                 << sortStrategyIdName(event.strategyId) << "\n";
-            appLogger().log(oss.str());
+            logApp(oss.str());
             break;
         }
 
         case SessionEventType::SessionClosing:
-            appLogger().log("[Audit] Session closing — terminating\n");
+            logApp("[Audit] Session closing — terminating\n");
             delete this;  // lifetime tied to the session
             break;
     }

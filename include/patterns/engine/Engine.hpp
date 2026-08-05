@@ -26,12 +26,12 @@ public:
 
     void start() {
         running_ = true;
-        patterns::services::appLogger().log("[Engine] Start\n");
+        patterns::services::logApp("[Engine] Start\n");
     }
 
     void stop() {
         running_ = false;
-        patterns::services::appLogger().log("[Engine] Stop\n");
+        patterns::services::logApp("[Engine] Stop\n");
     }
 
     void addVector(const std::vector<int>& vec) {
@@ -42,17 +42,17 @@ public:
         sortStrategy_ = std::move(strategy);
         std::ostringstream oss;
         oss << "[Engine] Sort strategy set: " << sortStrategy_->name() << "\n";
-        patterns::services::appLogger().log(oss.str());
+        patterns::services::logApp(oss.str());
     }
 
     void sortVector(size_t index) {
         if (index >= data_.size()) {
-            patterns::services::appLogger().log("[Engine] Invalid vector index\n");
+            patterns::services::logApp("[Engine] Invalid vector index\n");
             return;
         }
         std::ostringstream oss;
         oss << "[Engine] Sorting with strategy: " << sortStrategy_->name() << "\n";
-        patterns::services::appLogger().log(oss.str());
+        patterns::services::logApp(oss.str());
         (*sortStrategy_)(data_[index]);
     }
 
@@ -64,34 +64,34 @@ public:
             for (int v : data_[i]) oss << v << " ";
             oss << "\n";
         }
-        patterns::services::appLogger().log(oss.str());
+        patterns::services::logApp(oss.str());
     }
 
     void onSessionEvent(const patterns::observer::SessionEvent& event) override {
         using patterns::observer::SessionEventType;
         using patterns::strategy::SortStrategyFactory;
 
-        patterns::services::appLogger().log("[Engine] Event received: session state changed\n");
+        patterns::services::logApp("[Engine] Event received: session state changed\n");
 
         switch (event.type) {
             case SessionEventType::VectorAdded:
-                patterns::services::appLogger().log("[Engine] -> recognized: vector added\n");
+                patterns::services::logApp("[Engine] -> recognized: vector added\n");
                 addVector(event.vectorData);
                 break;
             case SessionEventType::SortRequested:
-                patterns::services::appLogger().log("[Engine] -> recognized: sort requested\n");
+                patterns::services::logApp("[Engine] -> recognized: sort requested\n");
                 sortVector(event.index);
                 break;
             case SessionEventType::PrintRequested:
-                patterns::services::appLogger().log("[Engine] -> recognized: print requested\n");
+                patterns::services::logApp("[Engine] -> recognized: print requested\n");
                 printData();
                 break;
             case SessionEventType::StrategyChangeRequested:
-                patterns::services::appLogger().log("[Engine] -> recognized: strategy change requested\n");
+                patterns::services::logApp("[Engine] -> recognized: strategy change requested\n");
                 setSortStrategy(SortStrategyFactory::create(event.strategyId));
                 break;
             case SessionEventType::SessionClosing:
-                patterns::services::appLogger().log("[Engine] -> recognized: session closing, cleaning up and stopping\n");
+                patterns::services::logApp("[Engine] -> recognized: session closing, cleaning up and stopping\n");
                 stop();
                 break;
         }

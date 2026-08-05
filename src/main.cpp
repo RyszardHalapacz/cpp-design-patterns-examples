@@ -24,8 +24,8 @@ int main(int argc, char* argv[]) {
     ServiceLocator::instance().provide<FileLogger>(std::make_shared<FileLogger>("engine_log.txt"));
     ServiceLocator::instance().provideRuntime     (std::make_shared<DoSomething>());
 
-    appFileLogger().log("=== Program start ===\n");
-    appDoSomethingByPointer().do_();
+    logFile("=== Program start ===\n");
+    if (auto r = appDoSomethingByPointer()) r->get().do_();
 
     patterns::manifest::ComponentManifestWriter appWriter;
     appWriter.write(exeDir / "application.yml", "patterns", "PatternsApp", APP_VERSION_STR);
@@ -81,7 +81,7 @@ int main(int argc, char* argv[]) {
 
     gui->clickAddVector({100, 200});  // session closed
 
-    appFileLogger().log("=== Program end ===\n");
+    logFile("=== Program end ===\n");
 
     return 0;
 }

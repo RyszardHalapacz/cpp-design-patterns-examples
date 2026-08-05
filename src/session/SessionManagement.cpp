@@ -13,26 +13,26 @@ using patterns::strategy::SortStrategyId;
 using patterns::strategy::sortStrategyIdName;
 using patterns::gui::CommandBatch;
 using patterns::gui::CommandType;
-using patterns::services::appLogger;
+using patterns::services::logApp;
 
 void SessionManagement::connectToEngine(patterns::engine::Engine& engine) {
     engine_ = &engine;
-    appLogger().log("[Session] Connecting to Engine\n");
-    appLogger().log("[Session] Checking configuration\n");
-    appLogger().log("[Session] Engine connected\n");
+    logApp("[Session] Connecting to Engine\n");
+    logApp("[Session] Checking configuration\n");
+    logApp("[Session] Engine connected\n");
     attach(&engine);
 }
 
 void SessionManagement::openSession() {
-    if (!engine_) { appLogger().log("[Session] No Engine\n"); return; }
+    if (!engine_) { logApp("[Session] No Engine\n"); return; }
     sessionActive_ = true;
-    appLogger().log("[Session] Opening session\n");
+    logApp("[Session] Opening session\n");
     engine_->start();
 }
 
 void SessionManagement::closeSession() {
-    if (!engine_) { appLogger().log("[Session] No Engine\n"); return; }
-    appLogger().log("[Session] Closing session — notifying all observers\n");
+    if (!engine_) { logApp("[Session] No Engine\n"); return; }
+    logApp("[Session] Closing session — notifying all observers\n");
     sessionActive_ = false;
     notify(SessionEvent{SessionEventType::SessionClosing, {}, 0});
     observers_.clear();
@@ -40,19 +40,19 @@ void SessionManagement::closeSession() {
 
 void SessionManagement::addVectorFromGui(const std::vector<int>& vec) {
     if (!checkSession()) return;
-    appLogger().log("[Session] GUI wants to add vector\n");
+    logApp("[Session] GUI wants to add vector\n");
     notify(SessionEvent{SessionEventType::VectorAdded, vec, 0});
 }
 
 void SessionManagement::sortVectorFromGui(size_t index) {
     if (!checkSession()) return;
-    appLogger().log("[Session] GUI wants to sort vector\n");
+    logApp("[Session] GUI wants to sort vector\n");
     notify(SessionEvent{SessionEventType::SortRequested, {}, index});
 }
 
 void SessionManagement::printDataFromGui() {
     if (!checkSession()) return;
-    appLogger().log("[Session] GUI wants to print data\n");
+    logApp("[Session] GUI wants to print data\n");
     notify(SessionEvent{SessionEventType::PrintRequested, {}, 0});
 }
 
@@ -60,7 +60,7 @@ void SessionManagement::executeBatch(const CommandBatch& batch) {
     std::ostringstream header;
     header << "[Session] Received command batch (" << batch.size()
            << ") — executing in order\n";
-    appLogger().log(header.str());
+    logApp(header.str());
 
     for (const auto& cmd : batch) {
         switch (cmd.type) {
@@ -69,19 +69,19 @@ void SessionManagement::executeBatch(const CommandBatch& batch) {
             case CommandType::PrintData:  printDataFromGui();                break;
         }
     }
-    appLogger().log("[Session] Command batch executed\n");
+    logApp("[Session] Command batch executed\n");
 }
 
 void SessionManagement::setSortStrategyFromGui(SortStrategyId id) {
-    if (!engine_) { appLogger().log("[Session] No Engine\n"); return; }
+    if (!engine_) { logApp("[Session] No Engine\n"); return; }
     if (!isStrategyAllowed(id)) {
         std::ostringstream oss;
         oss << "[Session] Strategy \"" << sortStrategyIdName(id)
             << "\" not allowed — Configurator did not authorize it\n";
-        appLogger().log(oss.str());
+        logApp(oss.str());
         return;
     }
-    appLogger().log("[Session] GUI requests sort strategy change\n");
+    logApp("[Session] GUI requests sort strategy change\n");
     notify(SessionEvent{SessionEventType::StrategyChangeRequested, {}, 0, id});
 }
 
@@ -109,8 +109,8 @@ bool SessionManagement::isStrategyAllowed(SortStrategyId id) const {
 }
 
 bool SessionManagement::checkSession() const {
-    if (!engine_)        { appLogger().log("[Session] No Engine\n");       return false; }
-    if (!sessionActive_) { appLogger().log("[Session] Session inactive\n"); return false; }
+    if (!engine_)        { logApp("[Session] No Engine\n");       return false; }
+    if (!sessionActive_) { logApp("[Session] Session inactive\n"); return false; }
     return true;
 }
 

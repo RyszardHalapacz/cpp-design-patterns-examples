@@ -214,6 +214,70 @@ TEST_F(GuiTest, FlushBatchExecutesCommands) {
     EXPECT_NE(out.find("command batch"), std::string::npos);
 }
 
+// ─── DummyGui — no access paths ──────────────────────────────────────────────
+
+TEST_F(GuiTest, ClickAddVectorWithoutAccessLogsError) {
+    auto* gui = makeGUI(); // no configureGui — functions not connected
+    testing::internal::CaptureStdout();
+    gui->clickAddVector({1, 2});
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("No access to AddVector"), std::string::npos);
+}
+
+TEST_F(GuiTest, ClickSortVectorWithoutAccessLogsError) {
+    auto* gui = makeGUI();
+    testing::internal::CaptureStdout();
+    gui->clickSortVector(0);
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("No access to SortVector"), std::string::npos);
+}
+
+TEST_F(GuiTest, ClickPrintDataWithoutAccessLogsError) {
+    auto* gui = makeGUI();
+    testing::internal::CaptureStdout();
+    gui->clickPrintData();
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("No access to PrintData"), std::string::npos);
+}
+
+TEST_F(GuiTest, ClickSetSortStrategyWithoutAccessLogsError) {
+    auto* gui = makeGUI();
+    testing::internal::CaptureStdout();
+    gui->clickSetSortStrategy(SortStrategyId::Ascending);
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("No access to SetSortStrategy"), std::string::npos);
+}
+
+TEST_F(GuiTest, FlushBatchWithoutAccessLogsError) {
+    auto* gui = makeGUI();
+    gui->queueAddVector({1, 2, 3});
+    testing::internal::CaptureStdout();
+    gui->flushBatch();
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("No access to ExecuteBatch"), std::string::npos);
+}
+
+TEST_F(GuiTest, ClickWithExpiredSessionLogsError) {
+    auto* gui = makeGUI();
+    {
+        // Connect to a temporary session, then let it expire
+        auto tempSession = std::make_shared<SessionManagement>();
+        Configurator cfg;
+        cfg.configureGui(*gui, tempSession);
+    } // tempSession destroyed — weak_ptr in gui is now expired
+
+    testing::internal::CaptureStdout();
+    gui->clickAddVector({1, 2, 3});
+    std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
+    EXPECT_NE(out.find("no longer exists"), std::string::npos);
+}
+
 // ─── Configurator ────────────────────────────────────────────────────────────
 
 TEST_F(GuiTest, ConfigureGuiConnectsAllFunctions) {

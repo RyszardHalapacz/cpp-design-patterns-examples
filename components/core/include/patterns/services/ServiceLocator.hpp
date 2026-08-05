@@ -1,6 +1,9 @@
 #pragma once
+#include <expected>
+#include <functional>
+#include <iostream>
 #include <memory>
-#include <stdexcept>
+#include <sstream>
 #include <string>
 #include <typeindex>
 #include <unordered_map>
@@ -12,104 +15,199 @@
 namespace patterns::services {
 
 // ==================================
+// SERVICE LOCATOR ERROR
+// C++23: fallible operations return std::expected instead of throwing.
+// ==================================
+enum class ServiceLocatorErrorCode {
+    NullService,
+    ServiceNotFound,
+    InvalidServiceType
+};
+
+struct ServiceLocatorError {
+    ServiceLocatorErrorCode code;
+    std::string serviceType;
+};
+
+inline const char* serviceLocatorErrorCodeName(ServiceLocatorErrorCode code) {
+    switch (code) {
+        case ServiceLocatorErrorCode::NullService:        return "NullService";
+        case ServiceLocatorErrorCode::ServiceNotFound:    return "ServiceNotFound";
+        case ServiceLocatorErrorCode::InvalidServiceType: return "InvalidServiceType";
+    }
+    return "UnknownServiceLocatorError";
+}
+
+inline std::string serviceLocatorErrorMessage(const ServiceLocatorError& error) {
+    std::ostringstream oss;
+    oss << "ServiceLocator: " << serviceLocatorErrorCodeName(error.code)
+        << ", service type: " << error.serviceType;
+    return oss.str();
+}
+
+// ==================================
 // SERVICE LOCATOR
 // Generic service registry indexed by type (std::type_index).
 // Singleton — one instance per program.
 // ==================================
 class ServiceLocator {
 public:
+    using ServicePtr       = std::shared_ptr<IService>;
+    using RuntimeGetResult = std::expected<ServicePtr, ServiceLocatorError>;
+
     static ServiceLocator& instance() {
         static ServiceLocator locator;
         return locator;
     }
 
-    // Registration by template parameter (compile time)
+    // Registration by template parameter (compile time).
+    // Returns unexpected(NullService) if the shared_ptr is empty.
     template <typename TService>
-    void provide(std::shared_ptr<TService> service) {
-        static_assert(std::is_base_of<IService, TService>::value,
+    std::expected<void, ServiceLocatorError>
+    provide(std::shared_ptr<TService> service) {
+        static_assert(std::is_base_of_v<IService, TService>,
                       "TService must inherit from IService");
-        services_[std::type_index(typeid(TService))] = std::move(service);
-    }
-
-    template <typename TService>
-    TService& get() {
-        auto it = services_.find(std::type_index(typeid(TService)));
-        if (it == services_.end()) {
-            throw std::runtime_error(
-                std::string("ServiceLocator: no registered service of type ")
-                + typeid(TService).name());
+        if (!service) {
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::NullService,
+                typeid(TService).name()
+            });
         }
-        return *std::static_pointer_cast<TService>(it->second);
+        services_[std::type_index(typeid(TService))] = std::move(service);
+        return {};
     }
 
-    // Registration via RTTI (runtime) — key resolved dynamically
-    void provideRuntime(std::shared_ptr<IService> service) {
+    // Retrieval by template parameter.
+    // Returns unexpected(ServiceNotFound) when not registered.
+    template <typename TService>
+    std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
+    tryGet() {
+        static_assert(std::is_base_of_v<IService, TService>,
+                      "TService must inherit from IService");
+        const std::type_index key(typeid(TService));
+        const auto it = services_.find(key);
+        if (it == services_.end()) {
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::ServiceNotFound,
+                key.name()
+            });
+        }
+        return std::ref(*std::static_pointer_cast<TService>(it->second));
+    }
+
+    // Registration via RTTI — key resolved from the actual dynamic type.
+    // Returns unexpected(NullService) if the shared_ptr is empty.
+    std::expected<void, ServiceLocatorError>
+    provideRuntime(ServicePtr service) {
+        if (!service) {
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::NullService,
+                "IService"
+            });
+        }
         const IService& ref = *service;
         services_[std::type_index(typeid(ref))] = std::move(service);
+        return {};
     }
 
+    // Runtime retrieval with dynamic_cast type check.
+    // Returns unexpected(ServiceNotFound or InvalidServiceType).
     template <typename TService>
-    TService& getRuntime() {
-        auto it = services_.find(std::type_index(typeid(TService)));
+    std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
+    tryGetRuntime() {
+        static_assert(std::is_base_of_v<IService, TService>,
+                      "TService must inherit from IService");
+        const std::type_index key(typeid(TService));
+        const auto it = services_.find(key);
         if (it == services_.end()) {
-            throw std::runtime_error(
-                std::string("ServiceLocator: no registered service of type ")
-                + typeid(TService).name());
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::ServiceNotFound,
+                key.name()
+            });
         }
         auto casted = std::dynamic_pointer_cast<TService>(it->second);
         if (!casted) {
-            throw std::runtime_error(
-                std::string("ServiceLocator: service at this key is not of type ")
-                + typeid(TService).name());
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::InvalidServiceType,
+                key.name()
+            });
         }
-        return *casted;
+        return std::ref(*casted);
     }
 
-    // Non-template variant — returns raw IService pointer
-    std::shared_ptr<IService> getRuntime(const std::type_index& key) {
-        auto it = services_.find(key);
+    // Non-template variant — returns shared_ptr<IService> inside expected;
+    // the caller is responsible for the final cast.
+    RuntimeGetResult tryGetRuntime(const std::type_index& key) {
+        const auto it = services_.find(key);
         if (it == services_.end()) {
-            throw std::runtime_error(
-                std::string("ServiceLocator: no registered service of type ")
-                + key.name());
+            return std::unexpected(ServiceLocatorError{
+                ServiceLocatorErrorCode::ServiceNotFound,
+                key.name()
+            });
         }
         return it->second;
     }
 
 private:
     ServiceLocator() = default;
-    std::unordered_map<std::type_index, std::shared_ptr<IService>> services_;
+    std::unordered_map<std::type_index, ServicePtr> services_;
 };
 
 // ==================================
-// Access shortcuts — used throughout the project instead of
-// ServiceLocator::instance().get<...>()
+// Access shortcuts — return std::expected, not bare references.
 // ==================================
-inline Logger& appLogger() {
-    return ServiceLocator::instance().get<Logger>();
+inline auto appLogger() {
+    return ServiceLocator::instance().tryGet<Logger>();
 }
 
-inline FileLogger& appFileLogger() {
-    return ServiceLocator::instance().get<FileLogger>();
+inline auto appFileLogger() {
+    return ServiceLocator::instance().tryGet<FileLogger>();
 }
 
-inline DoSomething& appDoSomething() {
-    return ServiceLocator::instance().get<DoSomething>();
+inline auto appDoSomething() {
+    return ServiceLocator::instance().tryGet<DoSomething>();
 }
 
-inline DoSomething& appDoSomethingRuntime() {
-    return ServiceLocator::instance().getRuntime<DoSomething>();
+inline auto appDoSomethingRuntime() {
+    return ServiceLocator::instance().tryGetRuntime<DoSomething>();
 }
 
-inline DoSomething& appDoSomethingByPointer() {
-    auto service = ServiceLocator::instance().getRuntime(
+inline std::expected<std::reference_wrapper<DoSomething>, ServiceLocatorError>
+appDoSomethingByPointer() {
+    auto serviceResult = ServiceLocator::instance().tryGetRuntime(
         std::type_index(typeid(DoSomething)));
-    auto* casted = dynamic_cast<DoSomething*>(service.get());
-    if (!casted) {
-        throw std::runtime_error(
-            "appDoSomethingByPointer: service under this type is not DoSomething");
+    if (!serviceResult) {
+        return std::unexpected(serviceResult.error());
     }
-    return *casted;
+    auto* casted = dynamic_cast<DoSomething*>(serviceResult->get());
+    if (!casted) {
+        return std::unexpected(ServiceLocatorError{
+            ServiceLocatorErrorCode::InvalidServiceType,
+            typeid(DoSomething).name()
+        });
+    }
+    return std::ref(*casted);
+}
+
+// logApp — convenience wrapper used throughout the codebase instead of
+// appLogger().log(...).  Handles a missing Logger gracefully: falls back to
+// std::cerr so callers never need to repeat expected-handling boilerplate.
+inline void logApp(const std::string& message) {
+    auto result = appLogger();
+    if (!result) {
+        std::cerr << "[LOG ERROR] " << serviceLocatorErrorMessage(result.error()) << "\n";
+        return;
+    }
+    result->get().log(message);
+}
+
+// logFile — logs via FileLogger using monadic transform; silently no-ops
+// if FileLogger is not registered.
+inline std::expected<void, ServiceLocatorError> logFile(const std::string& message) {
+    return appFileLogger().transform(
+        [&message](std::reference_wrapper<FileLogger> logger) {
+            logger.get().log(message);
+        });
 }
 
 } // namespace patterns::services

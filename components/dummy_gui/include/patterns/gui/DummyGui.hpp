@@ -31,61 +31,61 @@ public:
     void connectSetSortStrategy(const std::shared_ptr<patterns::session::SessionManagement>& s, SetSortStrategyFunc f) { session_ = s; setSortStrategyFunc_ = f; }
 
     void clickAddVector(const std::vector<int>& vec) {
-        if (!addVectorFunc_) { patterns::services::appLogger().log("[GUI] No access to AddVector\n"); return; }
+        if (!addVectorFunc_) { patterns::services::logApp("[GUI] No access to AddVector\n"); return; }
         auto s = lockSession(); if (!s) return;
-        patterns::services::appLogger().log("[GUI] Clicked AddVector\n");
+        patterns::services::logApp("[GUI] Clicked AddVector\n");
         ((*s).*addVectorFunc_)(vec);
     }
 
     void clickSortVector(size_t index) {
-        if (!sortVectorFunc_) { patterns::services::appLogger().log("[GUI] No access to SortVector\n"); return; }
+        if (!sortVectorFunc_) { patterns::services::logApp("[GUI] No access to SortVector\n"); return; }
         auto s = lockSession(); if (!s) return;
-        patterns::services::appLogger().log("[GUI] Clicked SortVector\n");
+        patterns::services::logApp("[GUI] Clicked SortVector\n");
         ((*s).*sortVectorFunc_)(index);
     }
 
     void clickPrintData() {
-        if (!printDataFunc_) { patterns::services::appLogger().log("[GUI] No access to PrintData\n"); return; }
+        if (!printDataFunc_) { patterns::services::logApp("[GUI] No access to PrintData\n"); return; }
         auto s = lockSession(); if (!s) return;
-        patterns::services::appLogger().log("[GUI] Clicked PrintData\n");
+        patterns::services::logApp("[GUI] Clicked PrintData\n");
         ((*s).*printDataFunc_)();
     }
 
     void clickSetSortStrategy(patterns::strategy::SortStrategyId id) {
-        if (!setSortStrategyFunc_) { patterns::services::appLogger().log("[GUI] No access to SetSortStrategy\n"); return; }
+        if (!setSortStrategyFunc_) { patterns::services::logApp("[GUI] No access to SetSortStrategy\n"); return; }
         auto s = lockSession(); if (!s) return;
-        patterns::services::appLogger().log("[GUI] Clicked SetSortStrategy\n");
+        patterns::services::logApp("[GUI] Clicked SetSortStrategy\n");
         ((*s).*setSortStrategyFunc_)(id);
     }
 
     BasicDummyGui& queueAddVector(const std::vector<int>& vec) {
-        patterns::services::appLogger().log("[GUI] Adding AddVector to command batch\n");
+        patterns::services::logApp("[GUI] Adding AddVector to command batch\n");
         batchBuilder_.addVector(vec);
         return *this;
     }
 
     BasicDummyGui& queueSortVector(size_t index) {
-        patterns::services::appLogger().log("[GUI] Adding SortVector to command batch\n");
+        patterns::services::logApp("[GUI] Adding SortVector to command batch\n");
         batchBuilder_.sortVector(index);
         return *this;
     }
 
     BasicDummyGui& queuePrintData() {
-        patterns::services::appLogger().log("[GUI] Adding PrintData to command batch\n");
+        patterns::services::logApp("[GUI] Adding PrintData to command batch\n");
         batchBuilder_.printData();
         return *this;
     }
 
     CommandBatch buildBatch() {
-        patterns::services::appLogger().log("[GUI] Closing command batch, ready to send\n");
+        patterns::services::logApp("[GUI] Closing command batch, ready to send\n");
         return batchBuilder_.build();
     }
 
     void flushBatch() {
-        if (!executeBatchFunc_) { patterns::services::appLogger().log("[GUI] No access to ExecuteBatch\n"); return; }
+        if (!executeBatchFunc_) { patterns::services::logApp("[GUI] No access to ExecuteBatch\n"); return; }
         auto s = lockSession(); if (!s) return;
         CommandBatch batch = buildBatch();
-        patterns::services::appLogger().log("[GUI] Sending command batch to session\n");
+        patterns::services::logApp("[GUI] Sending command batch to session\n");
         ((*s).*executeBatchFunc_)(batch);
     }
 
@@ -99,7 +99,7 @@ private:
 
     std::shared_ptr<patterns::session::SessionManagement> lockSession() const {
         auto s = session_.lock();
-        if (!s) patterns::services::appLogger().log("[GUI] SessionManagement no longer exists — operation cancelled\n");
+        if (!s) patterns::services::logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
         return s;
     }
 

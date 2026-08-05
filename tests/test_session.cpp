@@ -10,6 +10,7 @@
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/observer/SessionEvent.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/gui/Command.hpp"
 
 using namespace patterns::session;
 using namespace patterns::observer;
@@ -223,6 +224,69 @@ TEST_F(SessionTest, AuditObserverLogsSortRequested) {
     EXPECT_NE(out.find("[Audit] Recorded: sort requested"), std::string::npos);
 
     delete audit;
+}
+
+TEST_F(SessionTest, AuditObserverLogsPrintRequested) {
+    auto* audit = new SessionAuditObserver();
+
+    SessionEvent ev;
+    ev.type = SessionEventType::PrintRequested;
+
+    testing::internal::CaptureStdout();
+    audit->onSessionEvent(ev);
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("[Audit] Recorded: print requested"), std::string::npos);
+
+    delete audit;
+}
+
+TEST_F(SessionTest, AuditObserverLogsStrategyChangeRequested) {
+    auto* audit = new SessionAuditObserver();
+
+    SessionEvent ev;
+    ev.type       = SessionEventType::StrategyChangeRequested;
+    ev.strategyId = SortStrategyId::Descending;
+
+    testing::internal::CaptureStdout();
+    audit->onSessionEvent(ev);
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("[Audit] Recorded: strategy change to"), std::string::npos);
+
+    delete audit;
+}
+
+TEST_F(SessionTest, ExecuteBatchDispatchesAllCommandTypes) {
+    patterns::engine::Engine engine;
+    SessionManagement session;
+
+    testing::internal::CaptureStdout();
+    session.connectToEngine(engine);
+    session.openSession();
+
+    using patterns::gui::Command;
+    using patterns::gui::CommandType;
+    using patterns::gui::CommandBatch;
+
+    CommandBatch batch = {
+        Command{CommandType::AddVector,  {3, 1, 2}, 0},
+        Command{CommandType::SortVector, {},        0},
+        Command{CommandType::PrintData,  {},        0},
+    };
+    session.executeBatch(batch);
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("command batch"), std::string::npos);
+    EXPECT_NE(out.find("GUI wants to add vector"), std::string::npos);
+    EXPECT_NE(out.find("GUI wants to sort"), std::string::npos);
+    EXPECT_NE(out.find("GUI wants to print"), std::string::npos);
+}
+
+TEST_F(SessionTest, SetSortStrategyFromGuiWithNoEngineLogsError) {
+    SessionManagement session; // no engine connected
+
+    testing::internal::CaptureStdout();
+    session.setSortStrategyFromGui(SortStrategyId::Ascending);
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("No Engine"), std::string::npos);
 }
 
 TEST_F(SessionTest, AuditObserverDeletesItselfOnSessionClosing) {
