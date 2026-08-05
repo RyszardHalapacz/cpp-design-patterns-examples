@@ -1,0 +1,24 @@
+#pragma once
+#include <vector>
+#include "patterns/strategy/SortStrategyId.hpp"
+
+namespace patterns::gui     { class DummyGui; }
+namespace patterns::session { class SessionManagement; }
+
+namespace patterns::config {
+
+// ==================================
+// CONFIGURATOR
+// Single place that decides: which GUI functions can be called
+// and which sort strategies may be swapped at runtime.
+// ==================================
+class Configurator {
+public:
+    void configureGui(patterns::gui::DummyGui& gui,
+                      patterns::session::SessionManagement& session);
+
+    void configureAllowedStrategies(patterns::session::SessionManagement& session,
+                                    std::vector<patterns::strategy::SortStrategyId> allowed);
+};
+
+} // namespace patterns::config
