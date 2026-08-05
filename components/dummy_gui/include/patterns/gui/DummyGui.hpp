@@ -2,8 +2,8 @@
 #include <filesystem>
 #include <memory>
 #include <vector>
-#include "Command.hpp"
-#include "CommandBatchBuilder.hpp"
+#include "patterns/gui/Command.hpp"
+#include "patterns/gui/CommandBatchBuilder.hpp"
 #include "patterns/session/SessionManagement.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/services/ServiceLocator.hpp"
@@ -21,12 +21,8 @@ public:
     using ExecuteBatchFunc    = void (patterns::session::SessionManagement::*)(const CommandBatch&);
     using SetSortStrategyFunc = void (patterns::session::SessionManagement::*)(patterns::strategy::SortStrategyId);
 
-    explicit BasicDummyGui(std::filesystem::path manifestPath = {}) {
-        if (!manifestPath.empty()) {
-            manifestWriter_.write(manifestPath, "DummyGui", "DummyGui", DUMMY_GUI_VERSION_STR);
-            manifestWriter_.printManifest(manifestPath);
-        }
-    }
+    friend BasicDummyGui* makeGUI(std::filesystem::path manifestPath);
+    friend void           deleteGUI(BasicDummyGui* gui);
 
     void connectAddVector      (const std::shared_ptr<patterns::session::SessionManagement>& s, AddVectorFunc       f) { session_ = s; addVectorFunc_       = f; }
     void connectSortVector     (const std::shared_ptr<patterns::session::SessionManagement>& s, SortVectorFunc      f) { session_ = s; sortVectorFunc_      = f; }
@@ -94,6 +90,13 @@ public:
     }
 
 private:
+    explicit BasicDummyGui(std::filesystem::path manifestPath = {}) {
+        if (!manifestPath.empty()) {
+            manifestWriter_.write(manifestPath, "DummyGui", "DummyGui", DUMMY_GUI_VERSION_STR);
+            manifestWriter_.printManifest(manifestPath);
+        }
+    }
+
     std::shared_ptr<patterns::session::SessionManagement> lockSession() const {
         auto s = session_.lock();
         if (!s) patterns::services::appLogger().log("[GUI] SessionManagement no longer exists — operation cancelled\n");
@@ -114,4 +117,34 @@ private:
 
 using DummyGui = BasicDummyGui<>;
 
+// ─── C-style factory functions ────────────────────────────────────────────────
+// Simulates the interface of legacy C libraries where opaque handles are
+// created and destroyed via paired init/cleanup functions (e.g. SDL_Init /
+// SDL_Quit, curl_easy_init / curl_easy_cleanup).  The private constructor
+// ensures DummyGui can only be obtained through makeGUI.
+
+inline DummyGui* makeGUI(std::filesystem::path manifestPath = {}) {
+    return new DummyGui(std::move(manifestPath));
+}
+
+inline void deleteGUI(DummyGui* gui) {
+    delete gui;
+}
+
 } // namespace patterns::gui
+
+// ─── unique_ptr support ───────────────────────────────────────────────────────
+// Specialising std::default_delete lets callers write
+//   std::unique_ptr<DummyGui> gui(makeGUI(...));
+// and have deleteGUI called automatically on destruction — no custom deleter
+// lambda needed at every call site.
+
+namespace std {
+template<>
+struct default_delete<patterns::gui::DummyGui> {
+    void operator()(patterns::gui::DummyGui* gui) const {
+        patterns::gui::deleteGUI(gui);
+    }
+};
+} // namespace std
+

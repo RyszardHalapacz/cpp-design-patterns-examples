@@ -23,51 +23,45 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(yaml-cpp)
 
 # ─── Component version numbers ───────────────────────────────────────────────
-set(APP_VERSION       "1.1.0")
-set(ENGINE_VERSION    "1.0.0")
-set(DUMMY_GUI_VERSION "1.1.0")
+set(APP_VERSION    "1.1.0")
+set(ENGINE_VERSION "1.0.0")
 
-configure_file(src/engine/engine.yml.in     ${CMAKE_BINARY_DIR}/src/engine/engine.yml    @ONLY)
-configure_file(src/gui/dummy_gui.yml.in     ${CMAKE_BINARY_DIR}/src/gui/dummy_gui.yml    @ONLY)
+configure_file(src/engine/engine.yml.in ${CMAKE_BINARY_DIR}/src/engine/engine.yml @ONLY)
 
-# ─── Static library ──────────────────────────────────────────────────────────
+# ─── GoogleTest via FetchContent ─────────────────────────────────────────────
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG        v1.14.0
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# ─── Components ──────────────────────────────────────────────────────────────
+add_subdirectory(components/core)
+add_subdirectory(components/dummy_gui)
+
+# ─── Static library (session + engine) ───────────────────────────────────────
 add_library(patterns_lib STATIC
-    src/services/Logger.cpp
-    src/services/FileLogger.cpp
-    src/services/DoSomething.cpp
-
-    src/strategy/AscendingSortStrategy.cpp
-    src/strategy/DescendingSortStrategy.cpp
-    src/strategy/BubbleSortStrategy.cpp
-    src/strategy/SortStrategyFactory.cpp
-
     src/session/SessionManagement.cpp
     src/session/SessionEstablisher.cpp
     src/session/SessionAuditObserver.cpp
-
-    src/gui/CommandBatchBuilder.cpp
-
-    src/config/Configurator.cpp
-
-    src/manifest/ManifestWriter.cpp
 )
 
 target_include_directories(patterns_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(patterns_lib PRIVATE yaml-cpp::yaml-cpp)
+target_link_libraries(patterns_lib PUBLIC core_lib)
 
 target_compile_definitions(patterns_lib PUBLIC
     APP_VERSION_STR="${APP_VERSION}"
     ENGINE_VERSION_STR="${ENGINE_VERSION}"
-    DUMMY_GUI_VERSION_STR="${DUMMY_GUI_VERSION}"
 )
 
 # ─── Main executable ─────────────────────────────────────────────────────────
 add_executable(patterns src/main.cpp)
-target_link_libraries(patterns PRIVATE patterns_lib)
-
+target_link_libraries(patterns PRIVATE dummy_gui_lib)
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 enable_testing()

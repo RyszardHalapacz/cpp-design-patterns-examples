@@ -129,57 +129,62 @@ TEST(CommandBatchBuilderTest, BuildClearsBuilderState) {
 // ─── DummyGui ────────────────────────────────────────────────────────────────
 
 TEST_F(GuiTest, ClickAddVectorCallsSession) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
     testing::internal::CaptureStdout();
-    gui.clickAddVector({7, 8, 9});
+    gui->clickAddVector({7, 8, 9});
     std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
     EXPECT_NE(out.find("GUI wants to add vector"), std::string::npos);
 }
 
 TEST_F(GuiTest, ClickSortVectorCallsSession) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
     testing::internal::CaptureStdout();
     session_->addVectorFromGui({3, 1, 2});
-    gui.clickSortVector(0);
+    gui->clickSortVector(0);
     std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
     EXPECT_NE(out.find("GUI wants to sort"), std::string::npos);
 }
 
 TEST_F(GuiTest, ClickPrintDataCallsSession) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
     testing::internal::CaptureStdout();
-    gui.clickPrintData();
+    gui->clickPrintData();
     std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
     EXPECT_NE(out.find("GUI wants to print"), std::string::npos);
 }
 
 TEST_F(GuiTest, ClickSetSortStrategyCallsSession) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
     testing::internal::CaptureStdout();
-    gui.clickSetSortStrategy(SortStrategyId::Descending);
+    gui->clickSetSortStrategy(SortStrategyId::Descending);
     std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
     EXPECT_NE(out.find("sort strategy"), std::string::npos);
 }
 
 TEST_F(GuiTest, QueueAndBuildBatch) {
-    DummyGui gui;
-    gui.queueAddVector({1, 2, 3});
-    gui.queueSortVector(0);
-    gui.queuePrintData();
+    auto* gui = makeGUI();
+    gui->queueAddVector({1, 2, 3});
+    gui->queueSortVector(0);
+    gui->queuePrintData();
 
-    CommandBatch batch = gui.buildBatch();
+    CommandBatch batch = gui->buildBatch();
+    deleteGUI(gui);
     ASSERT_EQ(batch.size(), 3u);
     EXPECT_EQ(batch[0].type, CommandType::AddVector);
     EXPECT_EQ(batch[1].type, CommandType::SortVector);
@@ -187,40 +192,43 @@ TEST_F(GuiTest, QueueAndBuildBatch) {
 }
 
 TEST_F(GuiTest, BuildBatchClearsQueue) {
-    DummyGui gui;
-    gui.queueAddVector({1, 2});
-    gui.buildBatch();
-    CommandBatch second = gui.buildBatch();
+    auto* gui = makeGUI();
+    gui->queueAddVector({1, 2});
+    gui->buildBatch();
+    CommandBatch second = gui->buildBatch();
+    deleteGUI(gui);
     EXPECT_TRUE(second.empty());
 }
 
 TEST_F(GuiTest, FlushBatchExecutesCommands) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
-    gui.queueAddVector({5, 3, 1});
+    gui->queueAddVector({5, 3, 1});
 
     testing::internal::CaptureStdout();
-    gui.flushBatch();
+    gui->flushBatch();
     std::string out = testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
     EXPECT_NE(out.find("command batch"), std::string::npos);
 }
 
 // ─── Configurator ────────────────────────────────────────────────────────────
 
 TEST_F(GuiTest, ConfigureGuiConnectsAllFunctions) {
-    DummyGui gui;
+    auto* gui = makeGUI();
     Configurator cfg;
-    cfg.configureGui(gui, session_);
+    cfg.configureGui(*gui, session_);
 
     // All click methods should work without crashing
     testing::internal::CaptureStdout();
-    EXPECT_NO_THROW(gui.clickAddVector({1}));
-    EXPECT_NO_THROW(gui.clickSortVector(0));
-    EXPECT_NO_THROW(gui.clickPrintData());
-    EXPECT_NO_THROW(gui.clickSetSortStrategy(SortStrategyId::Ascending));
+    EXPECT_NO_THROW(gui->clickAddVector({1}));
+    EXPECT_NO_THROW(gui->clickSortVector(0));
+    EXPECT_NO_THROW(gui->clickPrintData());
+    EXPECT_NO_THROW(gui->clickSetSortStrategy(SortStrategyId::Ascending));
     testing::internal::GetCapturedStdout();
+    deleteGUI(gui);
 }
 
 TEST_F(GuiTest, ConfigureAllowedStrategiesLimitsChoices) {

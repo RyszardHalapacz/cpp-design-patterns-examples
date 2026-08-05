@@ -8,6 +8,7 @@
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/manifest/ManifestWriter.hpp"
 #include <filesystem>
+#include <memory>
 
 
 int main(int argc, char* argv[]) {
@@ -32,16 +33,16 @@ int main(int argc, char* argv[]) {
 
     patterns::engine::Engine             engine(exeDir / "src" / "engine" / "engine.yml");
     auto session = std::make_shared<patterns::session::SessionManagement>();
-    patterns::gui::DummyGui              gui(exeDir / "src" / "gui" / "dummy_gui.yml");
+    std::unique_ptr<patterns::gui::DummyGui> gui(patterns::gui::makeGUI(fs::path(DUMMY_GUI_MANIFEST_PATH)));
     patterns::config::Configurator       configurator;
 
-    gui.clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
+    gui->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
     patterns::session::EngineSessionEstablisher establisher(*session, engine);
     establisher.establish();
 
-    configurator.configureGui(gui, session);
+    configurator.configureGui(*gui, session);
     configurator.configureAllowedStrategies(*session, {SortStrategyId::Ascending,
                                                        SortStrategyId::Descending});
 
@@ -50,35 +51,35 @@ int main(int argc, char* argv[]) {
     auto* audit = new patterns::session::SessionAuditObserver();
     session->attach(audit);
 
-    gui.clickAddVector({3, 1, 2});
-    gui.clickAddVector({9, 5, 7});
-    gui.clickPrintData();
+    gui->clickAddVector({3, 1, 2});
+    gui->clickAddVector({9, 5, 7});
+    gui->clickPrintData();
 
     // Default strategy (AscendingSort) — set in Engine constructor
-    gui.clickSortVector(0);
-    gui.clickPrintData();
+    gui->clickSortVector(0);
+    gui->clickPrintData();
 
     // STRATEGY — swap to an allowed strategy
-    gui.clickSetSortStrategy(SortStrategyId::Descending);
-    gui.clickSortVector(1);
-    gui.clickPrintData();
+    gui->clickSetSortStrategy(SortStrategyId::Descending);
+    gui->clickSortVector(1);
+    gui->clickPrintData();
 
     // Attempt to swap to a strategy outside the whitelist — will be rejected
-    gui.clickSetSortStrategy(SortStrategyId::Bubble);
-    gui.clickAddVector({5, 4, 3, 2, 1});
-    gui.clickSortVector(2);  // still Descending — Bubble was not accepted
-    gui.clickPrintData();
+    gui->clickSetSortStrategy(SortStrategyId::Bubble);
+    gui->clickAddVector({5, 4, 3, 2, 1});
+    gui->clickSortVector(2);  // still Descending — Bubble was not accepted
+    gui->clickPrintData();
 
     // BUILDER — GUI collects commands into a batch, sends all at once
-    gui.queueAddVector({8, 6, 4})
-       .queueSortVector(3)
-       .queuePrintData();
-    gui.flushBatch();
+    gui->queueAddVector({8, 6, 4})
+        .queueSortVector(3)
+        .queuePrintData();
+    gui->flushBatch();
 
     // Close session -> SessionClosing to all observers
     session->closeSession();
 
-    gui.clickAddVector({100, 200});  // session closed
+    gui->clickAddVector({100, 200});  // session closed
 
     appFileLogger().log("=== Program end ===\n");
 

@@ -1,5 +1,5 @@
 #pragma once
-#include "Command.hpp"
+#include "patterns/gui/Command.hpp"
 
 namespace patterns::gui {
 

@@ -1,0 +1,71 @@
+component: "DummyGui"
+cpp_type: "DummyGui"
+current_version: "@DUMMY_GUI_VERSION@"
+
+versions:
+  - version: "1.0.0"
+    status: "completed"
+    title: "Raw pointer baseline"
+
+    description: >
+      DummyGui stores a non-owning raw pointer to SessionManagement
+      and member function pointers configured by Configurator.
+
+    mechanisms:
+      - "raw SessionManagement pointer"
+      - "member function pointers"
+      - "Configurator-controlled access"
+
+    known_problems:
+      - "DummyGui can retain the address of a destroyed SessionManagement object"
+      - "a nullptr check cannot detect a dangling pointer"
+      - "the lifetime relationship is not expressed in the type system"
+
+    learning_goal: >
+      Demonstrate the lifetime risks of a non-owning raw pointer.
+
+  - version: "1.1.0"
+    status: "completed"
+    title: "Weak pointer lifetime protection"
+
+    description: >
+      DummyGui observes SessionManagement through std::weak_ptr.
+      Configurator passes a shared_ptr; the GUI stores a weak_ptr and
+      locks it before every operation.
+
+    mechanisms:
+      - "std::weak_ptr<SessionManagement>"
+      - "lock() before every operation"
+      - "shared_ptr passed by Configurator"
+
+    learning_goal: >
+      Demonstrate safe non-owning access without extending object lifetime.
+
+  - version: "@DUMMY_GUI_VERSION@"
+    status: "current"
+    title: "Separate component — static library with C-style API"
+
+    description: >
+      DummyGui is extracted into its own CMake sub-project (components/dummy_gui)
+      and built as a static library (dummy_gui_lib). The constructor is private;
+      objects are created and destroyed exclusively through the C-style factory
+      functions makeGUI() and deleteGUI(), simulating legacy C library APIs such
+      as SDL or libcurl. A std::default_delete<DummyGui> specialisation is
+      provided so that unique_ptr<DummyGui> automatically routes destruction
+      through deleteGUI(). The component has its own version, its own manifest,
+      and its own test suite.
+
+    mechanisms:
+      - "static library (dummy_gui_lib)"
+      - "private constructor"
+      - "friend makeGUI() / deleteGUI() — C-style factory API"
+      - "std::default_delete<DummyGui> specialisation"
+      - "unique_ptr<DummyGui> RAII wrapper in application"
+      - "std::weak_ptr<SessionManagement>"
+      - "BasicDummyGui<Writer> policy template"
+      - "independent CMake sub-project with own tests"
+
+    learning_goal: >
+      Demonstrate component isolation, C-style API simulation, and bridging
+      legacy resource management with modern RAII through unique_ptr and
+      default_delete.
