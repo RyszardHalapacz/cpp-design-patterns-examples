@@ -23,9 +23,9 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(yaml-cpp)
 
 # ─── Component version numbers ───────────────────────────────────────────────
-set(APP_VERSION       "1.0.0")
+set(APP_VERSION       "1.1.0")
 set(ENGINE_VERSION    "1.0.0")
-set(DUMMY_GUI_VERSION "1.0.0")
+set(DUMMY_GUI_VERSION "1.1.0")
 
 configure_file(src/engine/engine.yml.in     ${CMAKE_BINARY_DIR}/src/engine/engine.yml    @ONLY)
 configure_file(src/gui/dummy_gui.yml.in     ${CMAKE_BINARY_DIR}/src/gui/dummy_gui.yml    @ONLY)

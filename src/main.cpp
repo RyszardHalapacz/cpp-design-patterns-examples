@@ -31,24 +31,24 @@ int main(int argc, char* argv[]) {
     appWriter.printManifest(exeDir / "application.yml");
 
     patterns::engine::Engine             engine(exeDir / "src" / "engine" / "engine.yml");
-    patterns::session::SessionManagement session;
+    auto session = std::make_shared<patterns::session::SessionManagement>();
     patterns::gui::DummyGui              gui(exeDir / "src" / "gui" / "dummy_gui.yml");
     patterns::config::Configurator       configurator;
 
     gui.clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
-    patterns::session::EngineSessionEstablisher establisher(session, engine);
+    patterns::session::EngineSessionEstablisher establisher(*session, engine);
     establisher.establish();
 
     configurator.configureGui(gui, session);
-    configurator.configureAllowedStrategies(session, {SortStrategyId::Ascending,
-                                                      SortStrategyId::Descending});
+    configurator.configureAllowedStrategies(*session, {SortStrategyId::Ascending,
+                                                       SortStrategyId::Descending});
 
     // OBSERVER — extra observer allocated on the heap;
     // destroys itself when session closes (SessionClosing -> delete this)
     auto* audit = new patterns::session::SessionAuditObserver();
-    session.attach(audit);
+    session->attach(audit);
 
     gui.clickAddVector({3, 1, 2});
     gui.clickAddVector({9, 5, 7});
@@ -76,7 +76,7 @@ int main(int argc, char* argv[]) {
     gui.flushBatch();
 
     // Close session -> SessionClosing to all observers
-    session.closeSession();
+    session->closeSession();
 
     gui.clickAddVector({100, 200});  // session closed
 

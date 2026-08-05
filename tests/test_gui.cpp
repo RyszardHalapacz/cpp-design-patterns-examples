@@ -25,7 +25,7 @@ protected:
         // Suppress all output by default
         testing::internal::CaptureStdout();
         engine_  = std::make_unique<patterns::engine::Engine>();
-        session_ = std::make_unique<SessionManagement>();
+        session_ = std::make_shared<SessionManagement>();
         session_->connectToEngine(*engine_);
         session_->openSession();
         session_->setAllowedStrategies({SortStrategyId::Ascending,
@@ -35,7 +35,7 @@ protected:
     }
 
     std::unique_ptr<patterns::engine::Engine> engine_;
-    std::unique_ptr<SessionManagement>        session_;
+    std::shared_ptr<SessionManagement>        session_;
 };
 
 // ─── CommandBatchBuilder — parameterized single-command tests ─────────────────
@@ -131,7 +131,7 @@ TEST(CommandBatchBuilderTest, BuildClearsBuilderState) {
 TEST_F(GuiTest, ClickAddVectorCallsSession) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     testing::internal::CaptureStdout();
     gui.clickAddVector({7, 8, 9});
@@ -142,7 +142,7 @@ TEST_F(GuiTest, ClickAddVectorCallsSession) {
 TEST_F(GuiTest, ClickSortVectorCallsSession) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     testing::internal::CaptureStdout();
     session_->addVectorFromGui({3, 1, 2});
@@ -154,7 +154,7 @@ TEST_F(GuiTest, ClickSortVectorCallsSession) {
 TEST_F(GuiTest, ClickPrintDataCallsSession) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     testing::internal::CaptureStdout();
     gui.clickPrintData();
@@ -165,7 +165,7 @@ TEST_F(GuiTest, ClickPrintDataCallsSession) {
 TEST_F(GuiTest, ClickSetSortStrategyCallsSession) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     testing::internal::CaptureStdout();
     gui.clickSetSortStrategy(SortStrategyId::Descending);
@@ -197,7 +197,7 @@ TEST_F(GuiTest, BuildBatchClearsQueue) {
 TEST_F(GuiTest, FlushBatchExecutesCommands) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     gui.queueAddVector({5, 3, 1});
 
@@ -212,7 +212,7 @@ TEST_F(GuiTest, FlushBatchExecutesCommands) {
 TEST_F(GuiTest, ConfigureGuiConnectsAllFunctions) {
     DummyGui gui;
     Configurator cfg;
-    cfg.configureGui(gui, *session_);
+    cfg.configureGui(gui, session_);
 
     // All click methods should work without crashing
     testing::internal::CaptureStdout();

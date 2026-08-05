@@ -8,13 +8,13 @@ namespace patterns::config {
 using patterns::services::appLogger;
 
 void Configurator::configureGui(patterns::gui::DummyGui& gui,
-                                patterns::session::SessionManagement& session) {
+                                const std::shared_ptr<patterns::session::SessionManagement>& session) {
     appLogger().log("[Configurator] Granting GUI access to selected functions\n");
-    gui.connectAddVector      (&session, &patterns::session::SessionManagement::addVectorFromGui);
-    gui.connectSortVector     (&session, &patterns::session::SessionManagement::sortVectorFromGui);
-    gui.connectPrintData      (&session, &patterns::session::SessionManagement::printDataFromGui);
-    gui.connectExecuteBatch   (&session, &patterns::session::SessionManagement::executeBatch);
-    gui.connectSetSortStrategy(&session, &patterns::session::SessionManagement::setSortStrategyFromGui);
+    gui.connectAddVector      (session, &patterns::session::SessionManagement::addVectorFromGui);
+    gui.connectSortVector     (session, &patterns::session::SessionManagement::sortVectorFromGui);
+    gui.connectPrintData      (session, &patterns::session::SessionManagement::printDataFromGui);
+    gui.connectExecuteBatch   (session, &patterns::session::SessionManagement::executeBatch);
+    gui.connectSetSortStrategy(session, &patterns::session::SessionManagement::setSortStrategyFromGui);
 }
 
 void Configurator::configureAllowedStrategies(patterns::session::SessionManagement& session,

@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <memory>
 #include <vector>
 #include "Command.hpp"
 #include "CommandBatchBuilder.hpp"
@@ -27,42 +28,38 @@ public:
         }
     }
 
-    void connectAddVector      (patterns::session::SessionManagement* s, AddVectorFunc       f) { session_ = s; addVectorFunc_       = f; }
-    void connectSortVector     (patterns::session::SessionManagement* s, SortVectorFunc      f) { session_ = s; sortVectorFunc_      = f; }
-    void connectPrintData      (patterns::session::SessionManagement* s, PrintDataFunc       f) { session_ = s; printDataFunc_       = f; }
-    void connectExecuteBatch   (patterns::session::SessionManagement* s, ExecuteBatchFunc    f) { session_ = s; executeBatchFunc_    = f; }
-    void connectSetSortStrategy(patterns::session::SessionManagement* s, SetSortStrategyFunc f) { session_ = s; setSortStrategyFunc_ = f; }
+    void connectAddVector      (const std::shared_ptr<patterns::session::SessionManagement>& s, AddVectorFunc       f) { session_ = s; addVectorFunc_       = f; }
+    void connectSortVector     (const std::shared_ptr<patterns::session::SessionManagement>& s, SortVectorFunc      f) { session_ = s; sortVectorFunc_      = f; }
+    void connectPrintData      (const std::shared_ptr<patterns::session::SessionManagement>& s, PrintDataFunc       f) { session_ = s; printDataFunc_       = f; }
+    void connectExecuteBatch   (const std::shared_ptr<patterns::session::SessionManagement>& s, ExecuteBatchFunc    f) { session_ = s; executeBatchFunc_    = f; }
+    void connectSetSortStrategy(const std::shared_ptr<patterns::session::SessionManagement>& s, SetSortStrategyFunc f) { session_ = s; setSortStrategyFunc_ = f; }
 
     void clickAddVector(const std::vector<int>& vec) {
-        if (!session_ || !addVectorFunc_) {
-            patterns::services::appLogger().log("[GUI] No access to AddVector\n"); return;
-        }
+        if (!addVectorFunc_) { patterns::services::appLogger().log("[GUI] No access to AddVector\n"); return; }
+        auto s = lockSession(); if (!s) return;
         patterns::services::appLogger().log("[GUI] Clicked AddVector\n");
-        (session_->*addVectorFunc_)(vec);
+        ((*s).*addVectorFunc_)(vec);
     }
 
     void clickSortVector(size_t index) {
-        if (!session_ || !sortVectorFunc_) {
-            patterns::services::appLogger().log("[GUI] No access to SortVector\n"); return;
-        }
+        if (!sortVectorFunc_) { patterns::services::appLogger().log("[GUI] No access to SortVector\n"); return; }
+        auto s = lockSession(); if (!s) return;
         patterns::services::appLogger().log("[GUI] Clicked SortVector\n");
-        (session_->*sortVectorFunc_)(index);
+        ((*s).*sortVectorFunc_)(index);
     }
 
     void clickPrintData() {
-        if (!session_ || !printDataFunc_) {
-            patterns::services::appLogger().log("[GUI] No access to PrintData\n"); return;
-        }
+        if (!printDataFunc_) { patterns::services::appLogger().log("[GUI] No access to PrintData\n"); return; }
+        auto s = lockSession(); if (!s) return;
         patterns::services::appLogger().log("[GUI] Clicked PrintData\n");
-        (session_->*printDataFunc_)();
+        ((*s).*printDataFunc_)();
     }
 
     void clickSetSortStrategy(patterns::strategy::SortStrategyId id) {
-        if (!session_ || !setSortStrategyFunc_) {
-            patterns::services::appLogger().log("[GUI] No access to SetSortStrategy\n"); return;
-        }
+        if (!setSortStrategyFunc_) { patterns::services::appLogger().log("[GUI] No access to SetSortStrategy\n"); return; }
+        auto s = lockSession(); if (!s) return;
         patterns::services::appLogger().log("[GUI] Clicked SetSortStrategy\n");
-        (session_->*setSortStrategyFunc_)(id);
+        ((*s).*setSortStrategyFunc_)(id);
     }
 
     BasicDummyGui& queueAddVector(const std::vector<int>& vec) {
@@ -89,16 +86,21 @@ public:
     }
 
     void flushBatch() {
-        if (!session_ || !executeBatchFunc_) {
-            patterns::services::appLogger().log("[GUI] No access to ExecuteBatch\n"); return;
-        }
+        if (!executeBatchFunc_) { patterns::services::appLogger().log("[GUI] No access to ExecuteBatch\n"); return; }
+        auto s = lockSession(); if (!s) return;
         CommandBatch batch = buildBatch();
         patterns::services::appLogger().log("[GUI] Sending command batch to session\n");
-        (session_->*executeBatchFunc_)(batch);
+        ((*s).*executeBatchFunc_)(batch);
     }
 
 private:
-    patterns::session::SessionManagement* session_ = nullptr;
+    std::shared_ptr<patterns::session::SessionManagement> lockSession() const {
+        auto s = session_.lock();
+        if (!s) patterns::services::appLogger().log("[GUI] SessionManagement no longer exists — operation cancelled\n");
+        return s;
+    }
+
+    std::weak_ptr<patterns::session::SessionManagement> session_;
 
     AddVectorFunc       addVectorFunc_       = nullptr;
     SortVectorFunc      sortVectorFunc_      = nullptr;

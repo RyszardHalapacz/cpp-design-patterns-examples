@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <vector>
 #include "patterns/strategy/SortStrategyId.hpp"
 
@@ -15,7 +16,7 @@ namespace patterns::config {
 class Configurator {
 public:
     void configureGui(patterns::gui::DummyGui& gui,
-                      patterns::session::SessionManagement& session);
+                      const std::shared_ptr<patterns::session::SessionManagement>& session);
 
     void configureAllowedStrategies(patterns::session::SessionManagement& session,
                                     std::vector<patterns::strategy::SortStrategyId> allowed);
