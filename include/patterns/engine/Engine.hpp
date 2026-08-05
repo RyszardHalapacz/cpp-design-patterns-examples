@@ -1,28 +1,109 @@
 #pragma once
+#include <filesystem>
 #include <memory>
+#include <sstream>
 #include <vector>
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/strategy/ISortStrategy.hpp"
+#include "patterns/strategy/SortStrategyFactory.hpp"
+#include "patterns/services/ServiceLocator.hpp"
+#include "patterns/manifest/ManifestWriter.hpp"
+
 
 namespace patterns::engine {
 
-class Engine : public patterns::observer::ISessionObserver {
+template<typename Writer = patterns::manifest::ComponentManifestWriter>
+class BasicEngine : public patterns::observer::ISessionObserver {
 public:
-    Engine();
+    explicit BasicEngine(std::filesystem::path manifestPath = {})
+        : sortStrategy_(patterns::strategy::SortStrategyFactory::create(
+              patterns::strategy::SortStrategyId::Ascending)) {
+        if (!manifestPath.empty()) {
+            manifestWriter_.write(manifestPath, "Engine", "Engine", ENGINE_VERSION_STR);
+            manifestWriter_.printManifest(manifestPath);
+        }
+    }
 
-    void start();
-    void stop();
-    void addVector(const std::vector<int>& vec);
-    void setSortStrategy(std::unique_ptr<patterns::strategy::ISortStrategy> strategy);
-    void sortVector(size_t index);
-    void printData() const;
+    void start() {
+        running_ = true;
+        patterns::services::appLogger().log("[Engine] Start\n");
+    }
 
-    void onSessionEvent(const patterns::observer::SessionEvent& event) override;
+    void stop() {
+        running_ = false;
+        patterns::services::appLogger().log("[Engine] Stop\n");
+    }
+
+    void addVector(const std::vector<int>& vec) {
+        data_.push_back(vec);
+    }
+
+    void setSortStrategy(std::unique_ptr<patterns::strategy::ISortStrategy> strategy) {
+        sortStrategy_ = std::move(strategy);
+        std::ostringstream oss;
+        oss << "[Engine] Sort strategy set: " << sortStrategy_->name() << "\n";
+        patterns::services::appLogger().log(oss.str());
+    }
+
+    void sortVector(size_t index) {
+        if (index >= data_.size()) {
+            patterns::services::appLogger().log("[Engine] Invalid vector index\n");
+            return;
+        }
+        std::ostringstream oss;
+        oss << "[Engine] Sorting with strategy: " << sortStrategy_->name() << "\n";
+        patterns::services::appLogger().log(oss.str());
+        (*sortStrategy_)(data_[index]);
+    }
+
+    void printData() const {
+        std::ostringstream oss;
+        oss << "[Engine] Data:\n";
+        for (size_t i = 0; i < data_.size(); ++i) {
+            oss << "  [" << i << "]: ";
+            for (int v : data_[i]) oss << v << " ";
+            oss << "\n";
+        }
+        patterns::services::appLogger().log(oss.str());
+    }
+
+    void onSessionEvent(const patterns::observer::SessionEvent& event) override {
+        using patterns::observer::SessionEventType;
+        using patterns::strategy::SortStrategyFactory;
+
+        patterns::services::appLogger().log("[Engine] Event received: session state changed\n");
+
+        switch (event.type) {
+            case SessionEventType::VectorAdded:
+                patterns::services::appLogger().log("[Engine] -> recognized: vector added\n");
+                addVector(event.vectorData);
+                break;
+            case SessionEventType::SortRequested:
+                patterns::services::appLogger().log("[Engine] -> recognized: sort requested\n");
+                sortVector(event.index);
+                break;
+            case SessionEventType::PrintRequested:
+                patterns::services::appLogger().log("[Engine] -> recognized: print requested\n");
+                printData();
+                break;
+            case SessionEventType::StrategyChangeRequested:
+                patterns::services::appLogger().log("[Engine] -> recognized: strategy change requested\n");
+                setSortStrategy(SortStrategyFactory::create(event.strategyId));
+                break;
+            case SessionEventType::SessionClosing:
+                patterns::services::appLogger().log("[Engine] -> recognized: session closing, cleaning up and stopping\n");
+                stop();
+                break;
+        }
+    }
 
 private:
-    bool                                         running_ = false;
-    std::vector<std::vector<int>>                data_;
+    bool                                               running_ = false;
+    std::vector<std::vector<int>>                      data_;
     std::unique_ptr<patterns::strategy::ISortStrategy> sortStrategy_;
+    Writer                                             manifestWriter_;
 };
+
+using Engine = BasicEngine<>;
 
 } // namespace patterns::engine

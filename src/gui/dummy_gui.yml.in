@@ -1,0 +1,41 @@
+component: "DummyGui"
+cpp_type: "DummyGui"
+current_version: "@DUMMY_GUI_VERSION@"
+
+versions:
+  - version: "@DUMMY_GUI_VERSION@"
+    status: "current"
+    title: "Raw pointer baseline"
+
+    description: >
+      DummyGui stores a non-owning raw pointer to SessionManagement
+      and member function pointers configured by Configurator.
+
+    mechanisms:
+      - "raw SessionManagement pointer"
+      - "member function pointers"
+      - "Configurator-controlled access"
+
+    known_problems:
+      - "DummyGui can retain the address of a destroyed SessionManagement object"
+      - "a nullptr check cannot detect a dangling pointer"
+      - "the lifetime relationship is not expressed in the type system"
+
+    learning_goal: >
+      Demonstrate the lifetime risks of a non-owning raw pointer.
+
+  - version: "1.1.0"
+    status: "planned"
+    title: "Weak pointer lifetime protection"
+
+    description: >
+      DummyGui will observe SessionManagement through std::weak_ptr.
+
+    planned_changes:
+      - "replace SessionManagement* with std::weak_ptr<SessionManagement>"
+      - "lock the weak pointer before invoking an operation"
+      - "cancel the operation when SessionManagement no longer exists"
+      - "demonstrate the difference between nullptr and an expired weak_ptr"
+
+    learning_goal: >
+      Demonstrate safe non-owning access without extending object lifetime.

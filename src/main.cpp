@@ -6,8 +6,15 @@
 #include "patterns/gui/DummyGui.hpp"
 #include "patterns/config/Configurator.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/manifest/ManifestWriter.hpp"
+#include <filesystem>
 
-int main() {
+
+int main(int argc, char* argv[]) {
+    namespace fs = std::filesystem;
+    const fs::path exeDir = fs::weakly_canonical(fs::path(argv[0])).parent_path();
+    (void)argc;
+
     using namespace patterns::services;
     using patterns::strategy::SortStrategyId;
 
@@ -19,9 +26,13 @@ int main() {
     appFileLogger().log("=== Program start ===\n");
     appDoSomethingByPointer().do_();
 
-    patterns::engine::Engine             engine;
+    patterns::manifest::ComponentManifestWriter appWriter;
+    appWriter.write(exeDir / "application.yml", "patterns", "PatternsApp", APP_VERSION_STR);
+    appWriter.printManifest(exeDir / "application.yml");
+
+    patterns::engine::Engine             engine(exeDir / "src" / "engine" / "engine.yml");
     patterns::session::SessionManagement session;
-    patterns::gui::DummyGui              gui;
+    patterns::gui::DummyGui              gui(exeDir / "src" / "gui" / "dummy_gui.yml");
     patterns::config::Configurator       configurator;
 
     gui.clickAddVector({3, 1, 2});  // no access — Configurator not yet connected

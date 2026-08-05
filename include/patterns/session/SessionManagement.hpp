@@ -4,7 +4,7 @@
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/gui/Command.hpp"
 
-namespace patterns::engine { class Engine; }
+#include "patterns/engine/Engine.hpp"
 
 namespace patterns::session {
 

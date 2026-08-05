@@ -7,7 +7,7 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
-add_executable(wzorce_tests
+add_executable(patterns_tests
     test_services.cpp
     test_strategy.cpp
     test_engine.cpp
@@ -15,7 +15,11 @@ add_executable(wzorce_tests
     test_gui.cpp
 )
 
-target_link_libraries(wzorce_tests PRIVATE wzorce_lib GTest::gtest_main)
+target_link_libraries(patterns_tests PRIVATE patterns_lib GTest::gtest_main)
+
+target_compile_definitions(patterns_tests PRIVATE
+    WZORCE_BINARY_DIR="${CMAKE_BINARY_DIR}"
+)
 
 include(GoogleTest)
-gtest_discover_tests(wzorce_tests)
+gtest_discover_tests(patterns_tests)

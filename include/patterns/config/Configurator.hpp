@@ -2,8 +2,8 @@
 #include <vector>
 #include "patterns/strategy/SortStrategyId.hpp"
 
-namespace patterns::gui     { class DummyGui; }
-namespace patterns::session { class SessionManagement; }
+#include "patterns/gui/DummyGui.hpp"
+#include "patterns/session/SessionManagement.hpp"
 
 namespace patterns::config {
 

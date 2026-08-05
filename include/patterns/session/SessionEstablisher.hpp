@@ -1,6 +1,6 @@
 #pragma once
 
-namespace patterns::engine  { class Engine; }
+#include "patterns/engine/Engine.hpp"
 
 namespace patterns::session {
 

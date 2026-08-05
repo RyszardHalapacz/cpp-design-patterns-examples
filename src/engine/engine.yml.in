@@ -1,0 +1,39 @@
+component: "Engine"
+cpp_type: "Engine"
+current_version: "@ENGINE_VERSION@"
+
+versions:
+  - version: "@ENGINE_VERSION@"
+    status: "current"
+    title: "Observer with runtime sorting strategy"
+
+    description: >
+      Engine observes session events, stores vectors and delegates sorting
+      to a runtime-selected strategy created by SortStrategyFactory.
+
+    mechanisms:
+      - "Observer"
+      - "Strategy"
+      - "Factory"
+      - "std::unique_ptr<ISortStrategy>"
+      - "runtime strategy replacement"
+
+    known_problems:
+      - "internal state is mainly verified through textual log output"
+      - "the running state is not exposed through a read-only query"
+      - "tests are coupled to logging messages"
+
+    learning_goal: >
+      Demonstrate cooperation between Observer, Strategy and Factory.
+
+  - version: "1.1.0"
+    status: "planned"
+    title: "Explicit observable state"
+
+    planned_changes:
+      - "add read-only state queries"
+      - "allow tests to verify behavior without parsing log messages"
+      - "keep exclusive strategy ownership through std::unique_ptr"
+
+    learning_goal: >
+      Demonstrate testing through observable behavior and state.
