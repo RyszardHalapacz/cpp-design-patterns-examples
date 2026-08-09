@@ -46,13 +46,14 @@ add_library(patterns_lib STATIC
     src/session/SessionManagement.cpp
     src/session/SessionEstablisher.cpp
     src/session/SessionAuditObserver.cpp
+    src/app/Application.cpp
 )
 
 target_include_directories(patterns_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(patterns_lib PUBLIC core_lib)
+target_link_libraries(patterns_lib PUBLIC core_lib dummy_gui_lib)
 
 target_compile_definitions(patterns_lib PUBLIC
     APP_VERSION_STR="${APP_VERSION}"
