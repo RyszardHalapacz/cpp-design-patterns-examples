@@ -6,15 +6,34 @@
 namespace patterns::config {
 
 using patterns::services::logApp;
+using patterns::gui::CommandBatch;
+using patterns::strategy::SortStrategyId;
 
 void Configurator::configureGui(patterns::gui::DummyGui& gui,
                                 const std::shared_ptr<patterns::session::SessionManagement>& session) {
     logApp("[Configurator] Granting GUI access to selected functions\n");
-    gui.connectAddVector      (session, &patterns::session::SessionManagement::addVectorFromGui);
-    gui.connectSortVector     (session, &patterns::session::SessionManagement::sortVectorFromGui);
-    gui.connectPrintData      (session, &patterns::session::SessionManagement::printDataFromGui);
-    gui.connectExecuteBatch   (session, &patterns::session::SessionManagement::executeBatch);
-    gui.connectSetSortStrategy(session, &patterns::session::SessionManagement::setSortStrategyFromGui);
+    std::weak_ptr<patterns::session::SessionManagement> weak = session;
+
+    gui.connectAddVector([weak](const std::vector<int>& vec) {
+        if (auto s = weak.lock()) s->addVectorFromGui(vec);
+        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
+    });
+    gui.connectSortVector([weak](size_t index) {
+        if (auto s = weak.lock()) s->sortVectorFromGui(index);
+        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
+    });
+    gui.connectPrintData([weak]() {
+        if (auto s = weak.lock()) s->printDataFromGui();
+        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
+    });
+    gui.connectExecuteBatch([weak](const CommandBatch& batch) {
+        if (auto s = weak.lock()) s->executeBatch(batch);
+        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
+    });
+    gui.connectSetSortStrategy([weak](SortStrategyId id) {
+        if (auto s = weak.lock()) s->setSortStrategyFromGui(id);
+        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
+    });
 }
 
 void Configurator::configureAllowedStrategies(patterns::session::SessionManagement& session,
