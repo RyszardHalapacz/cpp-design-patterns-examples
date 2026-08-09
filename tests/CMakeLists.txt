@@ -6,7 +6,7 @@ add_executable(patterns_tests
     test_gui_owning.cpp
 )
 
-target_link_libraries(patterns_tests PRIVATE dummy_gui_lib GTest::gtest_main)
+target_link_libraries(patterns_tests PRIVATE patterns_lib GTest::gtest_main)
 
 target_compile_definitions(patterns_tests PRIVATE
     WZORCE_BINARY_DIR="${CMAKE_BINARY_DIR}"

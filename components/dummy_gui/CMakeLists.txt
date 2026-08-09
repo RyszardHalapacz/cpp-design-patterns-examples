@@ -7,7 +7,6 @@ configure_file(dummy_gui.yml.in
 
 add_library(dummy_gui_lib STATIC
     src/CommandBatchBuilder.cpp
-    src/Configurator.cpp
     src/DummyGuiAdapter.cpp
 )
 
@@ -15,7 +14,7 @@ target_include_directories(dummy_gui_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(dummy_gui_lib PUBLIC patterns_lib)
+target_link_libraries(dummy_gui_lib PUBLIC core_lib)
 
 target_compile_definitions(dummy_gui_lib PUBLIC
     DUMMY_GUI_VERSION_STR="${DUMMY_GUI_VERSION}"
