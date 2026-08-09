@@ -1,15 +1,14 @@
 #include "patterns/config/Configurator.hpp"
-#include "patterns/gui/DummyGui.hpp"
+#include "patterns/gui/DummyGuiAdapter.hpp"
 #include "patterns/session/SessionManagement.hpp"
 #include "patterns/services/ServiceLocator.hpp"
 
 namespace patterns::config {
 
 using patterns::services::logApp;
-using patterns::gui::CommandBatch;
 using patterns::strategy::SortStrategyId;
 
-void Configurator::configureGui(patterns::gui::DummyGui& gui,
+void Configurator::configureGui(patterns::gui::DummyGuiAdapter& gui,
                                 const std::shared_ptr<patterns::session::SessionManagement>& session) {
     logApp("[Configurator] Granting GUI access to selected functions\n");
     std::weak_ptr<patterns::session::SessionManagement> weak = session;
@@ -24,10 +23,6 @@ void Configurator::configureGui(patterns::gui::DummyGui& gui,
     });
     gui.connectPrintData([weak]() {
         if (auto s = weak.lock()) s->printDataFromGui();
-        else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
-    });
-    gui.connectExecuteBatch([weak](const CommandBatch& batch) {
-        if (auto s = weak.lock()) s->executeBatch(batch);
         else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
     });
     gui.connectSetSortStrategy([weak](SortStrategyId id) {

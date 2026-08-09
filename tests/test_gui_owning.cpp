@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 #include <memory>
 
-#include "patterns/gui/DummyGui.hpp"
+#include "patterns/gui/IGui.hpp"
+#include "patterns/gui/DummyGuiAdapter.hpp"
 #include "patterns/config/Configurator.hpp"
 #include "patterns/session/SessionManagement.hpp"
 #include "patterns/engine/Engine.hpp"
@@ -15,9 +16,9 @@ using namespace patterns::session;
 using namespace patterns::strategy;
 using namespace patterns::services;
 
-// ─── Owning GUI — unique_ptr<DummyGui> via std::default_delete specialisation ─
-// These tests exercise the RAII wrapper used in main.cpp.
-// Raw makeGUI/deleteGUI tests live in dummy_gui_tests (C-API simulation).
+// ─── Owning GUI — unique_ptr<DummyGuiAdapter> / unique_ptr<IGui> ─────────────
+// DummyGuiAdapter owns the underlying DummyGui (C-style API) internally.
+// Application stores unique_ptr<IGui> — the adapter is the owned entity.
 
 class OwningGuiTest : public ::testing::Test {
 protected:
@@ -38,25 +39,24 @@ protected:
     std::shared_ptr<SessionManagement>        session_;
 };
 
-TEST_F(OwningGuiTest, MakeGUIReturnsUsableInstance) {
-    std::unique_ptr<DummyGui> gui(makeGUI());
+TEST_F(OwningGuiTest, AdapterCreatesUsableInstance) {
+    auto gui = std::make_unique<DummyGuiAdapter>();
     ASSERT_NE(gui, nullptr);
 }
 
-TEST_F(OwningGuiTest, UniquePtrCallsDeleteGUIOnDestruction) {
-    // Verify the object can be created and destroyed through unique_ptr
-    // without crashing — default_delete<DummyGui> routes through deleteGUI.
+TEST_F(OwningGuiTest, UniquePtrDestroysAdapterOnReset) {
+    // Adapter manages its internal DummyGui — verify no crash on destruction.
     testing::internal::CaptureStdout();
     {
-        std::unique_ptr<DummyGui> gui(makeGUI());
+        auto gui = std::make_unique<DummyGuiAdapter>();
         ASSERT_NE(gui, nullptr);
-    } // deleteGUI called here via default_delete
+    } // ~DummyGuiAdapter calls deleteGUI internally
     testing::internal::GetCapturedStdout();
     SUCCEED();
 }
 
 TEST_F(OwningGuiTest, ConfiguratorWorksWithDereferencedUniquePtr) {
-    std::unique_ptr<DummyGui> gui(makeGUI());
+    auto gui = std::make_unique<DummyGuiAdapter>();
     Configurator cfg;
     cfg.configureGui(*gui, session_);
 
@@ -66,23 +66,23 @@ TEST_F(OwningGuiTest, ConfiguratorWorksWithDereferencedUniquePtr) {
     EXPECT_NE(out.find("GUI wants to add vector"), std::string::npos);
 }
 
-TEST_F(OwningGuiTest, ResetTransfersOwnershipAndDestroysGui) {
-    std::unique_ptr<DummyGui> gui(makeGUI());
+TEST_F(OwningGuiTest, ResetTransfersOwnershipAndDestroysAdapter) {
+    auto gui = std::make_unique<DummyGuiAdapter>();
     Configurator cfg;
     cfg.configureGui(*gui, session_);
 
     testing::internal::CaptureStdout();
-    gui.reset();  // deleteGUI fires here
+    gui.reset();  // ~DummyGuiAdapter fires here
     EXPECT_EQ(gui, nullptr);
     testing::internal::GetCapturedStdout();
 }
 
 TEST_F(OwningGuiTest, MoveOwnershipPreservesUsability) {
-    std::unique_ptr<DummyGui> gui(makeGUI());
+    auto gui = std::make_unique<DummyGuiAdapter>();
     Configurator cfg;
     cfg.configureGui(*gui, session_);
 
-    std::unique_ptr<DummyGui> moved = std::move(gui);
+    std::unique_ptr<DummyGuiAdapter> moved = std::move(gui);
     EXPECT_EQ(gui, nullptr);
     ASSERT_NE(moved, nullptr);
 
@@ -90,4 +90,16 @@ TEST_F(OwningGuiTest, MoveOwnershipPreservesUsability) {
     moved->clickPrintData();
     std::string out = testing::internal::GetCapturedStdout();
     EXPECT_NE(out.find("GUI wants to print"), std::string::npos);
+}
+
+TEST_F(OwningGuiTest, AdapterUsableAsIGui) {
+    // Application stores unique_ptr<IGui> — verify virtual dispatch works
+    std::unique_ptr<IGui> gui = std::make_unique<DummyGuiAdapter>();
+    Configurator cfg;
+    cfg.configureGui(static_cast<DummyGuiAdapter&>(*gui), session_);
+
+    testing::internal::CaptureStdout();
+    gui->clickAddVector({10, 20});
+    std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("GUI wants to add vector"), std::string::npos);
 }

@@ -4,6 +4,7 @@
 #include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/manifest/ManifestWriter.hpp"
+#include "patterns/gui/DummyGuiAdapter.hpp"
 
 namespace patterns::app {
 
@@ -28,17 +29,20 @@ void Application::configure() {
 
     engine_  = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
     session_ = std::make_shared<patterns::session::SessionManagement>();
-    gui_     = std::unique_ptr<patterns::gui::DummyGui>(
-                   patterns::gui::makeGUI(std::filesystem::path(DUMMY_GUI_MANIFEST_PATH)));
 
-    gui_->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
+    // ADAPTER — wraps the C-style DummyGui API behind the IGui interface
+    auto adapter = std::make_unique<patterns::gui::DummyGuiAdapter>(
+                       std::filesystem::path(DUMMY_GUI_MANIFEST_PATH));
+
+    adapter->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
     patterns::session::EngineSessionEstablisher establisher(*session_, engine_);
     if (auto r = establisher.establish(); !r)
         logApp("[App] Session establishment failed: " + r.error() + "\n");
 
-    configurator_.configureGui(*gui_, session_);
+    configurator_.configureGui(*adapter, session_);
+    gui_ = std::move(adapter);  // Application now holds IGui — DummyGuiAdapter hidden
     configurator_.configureAllowedStrategies(*session_, {SortStrategyId::Ascending,
                                                          SortStrategyId::Descending});
 

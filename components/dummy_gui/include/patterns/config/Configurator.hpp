@@ -3,7 +3,7 @@
 #include <vector>
 #include "patterns/strategy/SortStrategyId.hpp"
 
-#include "patterns/gui/DummyGui.hpp"
+#include "patterns/gui/DummyGuiAdapter.hpp"
 #include "patterns/session/SessionManagement.hpp"
 
 namespace patterns::config {
@@ -15,7 +15,7 @@ namespace patterns::config {
 // ==================================
 class Configurator {
 public:
-    void configureGui(patterns::gui::DummyGui& gui,
+    void configureGui(patterns::gui::DummyGuiAdapter& gui,
                       const std::shared_ptr<patterns::session::SessionManagement>& session);
 
     void configureAllowedStrategies(patterns::session::SessionManagement& session,

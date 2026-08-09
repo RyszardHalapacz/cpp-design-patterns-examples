@@ -8,6 +8,7 @@ configure_file(dummy_gui.yml.in
 add_library(dummy_gui_lib STATIC
     src/CommandBatchBuilder.cpp
     src/Configurator.cpp
+    src/DummyGuiAdapter.cpp
 )
 
 target_include_directories(dummy_gui_lib PUBLIC
