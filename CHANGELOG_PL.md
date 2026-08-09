@@ -6,6 +6,13 @@ Wszystkie istotne zmiany w projekcie są tutaj opisane, od najnowszych do najsta
 
 ## 2026-08-09
 
+### `docs: add CHANGELOG.md and CHANGELOG_PL.md with full commit history` — `f8c7eaa`
+
+- Stworzono `CHANGELOG.md` (po angielsku) i `CHANGELOG_PL.md` (po polsku)
+- Każdy commit opisany z datą, skrótem SHA, tytułem i wyjaśnieniem co i dlaczego zostało zmienione
+
+---
+
 ### `feat: add Adapter pattern (DummyGuiAdapter / IGui)` — `c6c96ff`
 
 Wprowadzenie wzorca **Adapter** (GoF) między warstwą aplikacji a biblioteką GUI z C-style API.

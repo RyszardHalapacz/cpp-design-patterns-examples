@@ -6,6 +6,13 @@ All notable changes to this project are documented here, in reverse chronologica
 
 ## 2026-08-09
 
+### `docs: add CHANGELOG.md and CHANGELOG_PL.md with full commit history` — `f8c7eaa`
+
+- Created `CHANGELOG.md` (English) and `CHANGELOG_PL.md` (Polish)
+- Every commit documented with date, SHA, title, and description of what changed and why
+
+---
+
 ### `feat: add Adapter pattern (DummyGuiAdapter / IGui)` — `c6c96ff`
 
 **GoF Adapter** introduced between the application layer and the C-style GUI library.
