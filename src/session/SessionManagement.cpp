@@ -20,7 +20,7 @@ void SessionManagement::connectToEngine(std::shared_ptr<patterns::engine::Engine
     logApp("[Session] Connecting to Engine\n");
     logApp("[Session] Checking configuration\n");
     logApp("[Session] Engine connected\n");
-    attach(engine.get());
+    attach(engine);
 }
 
 void SessionManagement::openSession() {
@@ -90,18 +90,28 @@ void SessionManagement::setAllowedStrategies(std::vector<SortStrategyId> allowed
     allowedStrategies_ = std::move(allowed);
 }
 
-void SessionManagement::attach(patterns::observer::ISessionObserver* observer) {
+void SessionManagement::attach(std::shared_ptr<patterns::observer::ISessionObserver> observer) {
+    std::erase_if(observers_, [](const auto& wp) { return wp.expired(); });
+    for (const auto& wp : observers_) {
+        if (wp.lock() == observer) {
+            logApp("[Session] Observer already attached — skipping\n");
+            return;
+        }
+    }
     observers_.push_back(observer);
 }
 
-void SessionManagement::detach(patterns::observer::ISessionObserver* observer) {
-    observers_.erase(
-        std::remove(observers_.begin(), observers_.end(), observer),
-        observers_.end());
+void SessionManagement::detach(std::shared_ptr<patterns::observer::ISessionObserver> observer) {
+    std::erase_if(observers_, [&observer](const auto& wp) {
+        auto existing = wp.lock();
+        return !existing || existing == observer;
+    });
 }
 
 void SessionManagement::notify(const SessionEvent& event) {
-    for (auto* obs : observers_) obs->onSessionEvent(event);
+    std::erase_if(observers_, [](const auto& wp) { return wp.expired(); });
+    for (const auto& wp : observers_)
+        if (auto obs = wp.lock()) obs->onSessionEvent(event);
 }
 
 bool SessionManagement::isStrategyAllowed(SortStrategyId id) const {

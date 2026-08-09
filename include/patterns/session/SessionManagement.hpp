@@ -26,17 +26,17 @@ public:
     void setSortStrategyFromGui(patterns::strategy::SortStrategyId id);
     void setAllowedStrategies(std::vector<patterns::strategy::SortStrategyId> allowed);
 
-    void attach(patterns::observer::ISessionObserver* observer);
-    void detach(patterns::observer::ISessionObserver* observer);
+    void attach(std::shared_ptr<patterns::observer::ISessionObserver> observer);
+    void detach(std::shared_ptr<patterns::observer::ISessionObserver> observer);
 
 private:
     void notify(const patterns::observer::SessionEvent& event);
     bool isStrategyAllowed(patterns::strategy::SortStrategyId id) const;
     bool checkSession() const;
 
-    std::weak_ptr<patterns::engine::Engine>            engine_;
-    bool                                             sessionActive_  = false;
-    std::vector<patterns::observer::ISessionObserver*> observers_;
+    std::weak_ptr<patterns::engine::Engine>                          engine_;
+    bool                                                             sessionActive_ = false;
+    std::vector<std::weak_ptr<patterns::observer::ISessionObserver>> observers_;
     std::vector<patterns::strategy::SortStrategyId>    allowedStrategies_;
 };
 

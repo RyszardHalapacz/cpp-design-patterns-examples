@@ -44,7 +44,7 @@ void Application::configure() {
 
     // OBSERVER — owned by Application; lifetime no longer tied to session
     audit_ = std::make_shared<patterns::session::SessionAuditObserver>();
-    session_->attach(audit_.get());
+    session_->attach(audit_);
 }
 
 void Application::run() {

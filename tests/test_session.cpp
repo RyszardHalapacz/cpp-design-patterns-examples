@@ -154,6 +154,24 @@ struct SpyObserver : ISessionObserver {
     }
 };
 
+TEST_F(SessionTest, ConnectToEngineTwiceDoesNotDuplicateObserver) {
+    auto engine = std::make_shared<patterns::engine::Engine>();
+    SessionManagement session;
+
+    testing::internal::CaptureStdout();
+    session.connectToEngine(engine);
+    session.connectToEngine(engine);  // second call — engine already attached
+    session.openSession();
+    session.addVectorFromGui({1, 2, 3});
+    std::string out = testing::internal::GetCapturedStdout();
+
+    // Engine would process VectorAdded once, not twice
+    size_t first  = out.find("[Engine] -> recognized: vector added");
+    size_t second = out.find("[Engine] -> recognized: vector added", first + 1);
+    EXPECT_NE(first,  std::string::npos);
+    EXPECT_EQ(second, std::string::npos);
+}
+
 TEST_F(SessionTest, AttachAndDetachObserver) {
     auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
@@ -162,20 +180,37 @@ TEST_F(SessionTest, AttachAndDetachObserver) {
     session.connectToEngine(engine);
     session.openSession();
 
-    SpyObserver spy;
-    session.attach(&spy);
+    auto spy = std::make_shared<SpyObserver>();
+    session.attach(spy);
     session.addVectorFromGui({1});
     testing::internal::GetCapturedStdout();
 
-    EXPECT_EQ(spy.callCount, 1);
-    EXPECT_EQ(spy.lastType, SessionEventType::VectorAdded);
+    EXPECT_EQ(spy->callCount, 1);
+    EXPECT_EQ(spy->lastType, SessionEventType::VectorAdded);
 
-    session.detach(&spy);
+    session.detach(spy);
     testing::internal::CaptureStdout();
     session.addVectorFromGui({2});
     testing::internal::GetCapturedStdout();
 
-    EXPECT_EQ(spy.callCount, 1); // no new calls after detach
+    EXPECT_EQ(spy->callCount, 1); // no new calls after detach
+}
+
+TEST_F(SessionTest, AttachDuplicateObserverIsIgnored) {
+    auto engine = std::make_shared<patterns::engine::Engine>();
+    SessionManagement session;
+
+    testing::internal::CaptureStdout();
+    session.connectToEngine(engine);
+    session.openSession();
+
+    auto spy = std::make_shared<SpyObserver>();
+    session.attach(spy);
+    session.attach(spy);  // duplicate — should be ignored
+    session.addVectorFromGui({1});
+    testing::internal::GetCapturedStdout();
+
+    EXPECT_EQ(spy->callCount, 1);  // called once, not twice
 }
 
 // ─── EngineSessionEstablisher ────────────────────────────────────────────────
@@ -300,7 +335,7 @@ TEST_F(SessionTest, AuditObserverOwnedExternallyOnSessionClosing) {
 
     // Owned by caller — lifetime independent of session
     auto audit = std::make_shared<SessionAuditObserver>();
-    session.attach(audit.get());
+    session.attach(audit);
 
     session.closeSession();
     std::string out = testing::internal::GetCapturedStdout();
