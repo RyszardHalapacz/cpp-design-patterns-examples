@@ -1,5 +1,5 @@
 #pragma once
-
+#include <memory>
 #include "patterns/engine/Engine.hpp"
 
 namespace patterns::session {
@@ -27,7 +27,8 @@ protected:
 // Concrete implementation: connects SessionManagement to Engine
 class EngineSessionEstablisher : public SessionEstablisher {
 public:
-    EngineSessionEstablisher(SessionManagement& session, patterns::engine::Engine& engine);
+    EngineSessionEstablisher(SessionManagement& session,
+                             std::shared_ptr<patterns::engine::Engine> engine);
 
 protected:
     bool checkPreconditions() override;
@@ -36,8 +37,8 @@ protected:
     void finalizeSetup()      override;
 
 private:
-    SessionManagement&       session_;
-    patterns::engine::Engine&  engine_;
+    SessionManagement&                        session_;
+    std::shared_ptr<patterns::engine::Engine> engine_;
 };
 
 } // namespace patterns::session

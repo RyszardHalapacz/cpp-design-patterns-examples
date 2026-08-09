@@ -20,8 +20,8 @@ void SessionEstablisher::establish() {
 }
 
 EngineSessionEstablisher::EngineSessionEstablisher(SessionManagement& session,
-                                                   patterns::engine::Engine& engine)
-    : session_(session), engine_(engine) {}
+                                                   std::shared_ptr<patterns::engine::Engine> engine)
+    : session_(session), engine_(std::move(engine)) {}
 
 bool EngineSessionEstablisher::checkPreconditions() {
     logApp("[EngineSessionEstablisher] Checking engine availability\n");

@@ -15,23 +15,24 @@ using patterns::gui::CommandBatch;
 using patterns::gui::CommandType;
 using patterns::services::logApp;
 
-void SessionManagement::connectToEngine(patterns::engine::Engine& engine) {
-    engine_ = &engine;
+void SessionManagement::connectToEngine(std::shared_ptr<patterns::engine::Engine> engine) {
+    engine_ = engine;
     logApp("[Session] Connecting to Engine\n");
     logApp("[Session] Checking configuration\n");
     logApp("[Session] Engine connected\n");
-    attach(&engine);
+    attach(engine.get());
 }
 
 void SessionManagement::openSession() {
-    if (!engine_) { logApp("[Session] No Engine\n"); return; }
+    auto engine = engine_.lock();
+    if (!engine) { logApp("[Session] No Engine\n"); return; }
     sessionActive_ = true;
     logApp("[Session] Opening session\n");
-    engine_->start();
+    engine->start();
 }
 
 void SessionManagement::closeSession() {
-    if (!engine_) { logApp("[Session] No Engine\n"); return; }
+    if (engine_.expired()) { logApp("[Session] No Engine\n"); return; }
     logApp("[Session] Closing session — notifying all observers\n");
     sessionActive_ = false;
     notify(SessionEvent{SessionEventType::SessionClosing, {}, 0});
@@ -73,7 +74,7 @@ void SessionManagement::executeBatch(const CommandBatch& batch) {
 }
 
 void SessionManagement::setSortStrategyFromGui(SortStrategyId id) {
-    if (!engine_) { logApp("[Session] No Engine\n"); return; }
+    if (engine_.expired()) { logApp("[Session] No Engine\n"); return; }
     if (!isStrategyAllowed(id)) {
         std::ostringstream oss;
         oss << "[Session] Strategy \"" << sortStrategyIdName(id)
@@ -109,8 +110,8 @@ bool SessionManagement::isStrategyAllowed(SortStrategyId id) const {
 }
 
 bool SessionManagement::checkSession() const {
-    if (!engine_)        { logApp("[Session] No Engine\n");       return false; }
-    if (!sessionActive_) { logApp("[Session] Session inactive\n"); return false; }
+    if (engine_.expired()) { logApp("[Session] No Engine\n");       return false; }
+    if (!sessionActive_)   { logApp("[Session] Session inactive\n"); return false; }
     return true;
 }
 

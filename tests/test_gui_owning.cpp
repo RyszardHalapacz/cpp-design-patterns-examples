@@ -24,9 +24,9 @@ protected:
     void SetUp() override {
         ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
         testing::internal::CaptureStdout();
-        engine_  = std::make_unique<patterns::engine::Engine>();
+        engine_  = std::make_shared<patterns::engine::Engine>();
         session_ = std::make_shared<SessionManagement>();
-        session_->connectToEngine(*engine_);
+        session_->connectToEngine(engine_);
         session_->openSession();
         session_->setAllowedStrategies({SortStrategyId::Ascending,
                                         SortStrategyId::Descending,
@@ -34,7 +34,7 @@ protected:
         testing::internal::GetCapturedStdout();
     }
 
-    std::unique_ptr<patterns::engine::Engine> engine_;
+    std::shared_ptr<patterns::engine::Engine> engine_;
     std::shared_ptr<SessionManagement>        session_;
 };
 

@@ -26,7 +26,7 @@ void Application::configure() {
     appWriter.write(exeDir_ / "application.yml", "patterns", "PatternsApp", APP_VERSION_STR);
     appWriter.printManifest(exeDir_ / "application.yml");
 
-    engine_  = std::make_unique<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
+    engine_  = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
     session_ = std::make_shared<patterns::session::SessionManagement>();
     gui_     = std::unique_ptr<patterns::gui::DummyGui>(
                    patterns::gui::makeGUI(std::filesystem::path(DUMMY_GUI_MANIFEST_PATH)));
@@ -34,7 +34,7 @@ void Application::configure() {
     gui_->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
-    patterns::session::EngineSessionEstablisher establisher(*session_, *engine_);
+    patterns::session::EngineSessionEstablisher establisher(*session_, engine_);
     establisher.establish();
 
     configurator_.configureGui(*gui_, session_);

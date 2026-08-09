@@ -23,7 +23,7 @@ public:
 
 private:
     std::filesystem::path                                 exeDir_;
-    std::unique_ptr<patterns::engine::Engine>             engine_;
+    std::shared_ptr<patterns::engine::Engine>             engine_;
     std::shared_ptr<patterns::session::SessionManagement> session_;
     std::shared_ptr<patterns::session::SessionAuditObserver> audit_;
     std::unique_ptr<patterns::gui::DummyGui>              gui_;

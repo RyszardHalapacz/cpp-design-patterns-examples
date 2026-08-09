@@ -27,7 +27,7 @@ protected:
 // ─── SessionManagement ───────────────────────────────────────────────────────
 
 TEST_F(SessionTest, ConnectToEngineAttachesEngineAsObserver) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -37,7 +37,7 @@ TEST_F(SessionTest, ConnectToEngineAttachesEngineAsObserver) {
 }
 
 TEST_F(SessionTest, OpenSessionStartsEngine) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -56,7 +56,7 @@ TEST_F(SessionTest, OpenSessionWithoutEngineLogsError) {
 }
 
 TEST_F(SessionTest, CloseSessionNotifiesObserversAndClearsState) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -69,7 +69,7 @@ TEST_F(SessionTest, CloseSessionNotifiesObserversAndClearsState) {
 }
 
 TEST_F(SessionTest, AddVectorFromGuiWhenSessionInactive) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -81,7 +81,7 @@ TEST_F(SessionTest, AddVectorFromGuiWhenSessionInactive) {
 }
 
 TEST_F(SessionTest, AddVectorFromGuiWhenSessionActive) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -93,7 +93,7 @@ TEST_F(SessionTest, AddVectorFromGuiWhenSessionActive) {
 }
 
 TEST_F(SessionTest, SortVectorFromGuiForwardsEvent) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -106,7 +106,7 @@ TEST_F(SessionTest, SortVectorFromGuiForwardsEvent) {
 }
 
 TEST_F(SessionTest, PrintDataFromGuiForwardsEvent) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -118,7 +118,7 @@ TEST_F(SessionTest, PrintDataFromGuiForwardsEvent) {
 }
 
 TEST_F(SessionTest, SetSortStrategyAllowedStrategy) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -131,7 +131,7 @@ TEST_F(SessionTest, SetSortStrategyAllowedStrategy) {
 }
 
 TEST_F(SessionTest, SetSortStrategyForbiddenStrategy) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -155,7 +155,7 @@ struct SpyObserver : ISessionObserver {
 };
 
 TEST_F(SessionTest, AttachAndDetachObserver) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -181,7 +181,7 @@ TEST_F(SessionTest, AttachAndDetachObserver) {
 // ─── EngineSessionEstablisher ────────────────────────────────────────────────
 
 TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -256,7 +256,7 @@ TEST_F(SessionTest, AuditObserverLogsStrategyChangeRequested) {
 }
 
 TEST_F(SessionTest, ExecuteBatchDispatchesAllCommandTypes) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
@@ -290,7 +290,7 @@ TEST_F(SessionTest, SetSortStrategyFromGuiWithNoEngineLogsError) {
 }
 
 TEST_F(SessionTest, AuditObserverOwnedExternallyOnSessionClosing) {
-    patterns::engine::Engine engine;
+    auto engine = std::make_shared<patterns::engine::Engine>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();

@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <vector>
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
@@ -14,7 +15,7 @@ namespace patterns::session {
 // ==================================
 class SessionManagement {
 public:
-    void connectToEngine(patterns::engine::Engine& engine);
+    void connectToEngine(std::shared_ptr<patterns::engine::Engine> engine);
     void openSession();
     void closeSession();
 
@@ -33,7 +34,7 @@ private:
     bool isStrategyAllowed(patterns::strategy::SortStrategyId id) const;
     bool checkSession() const;
 
-    patterns::engine::Engine*                          engine_         = nullptr;
+    std::weak_ptr<patterns::engine::Engine>            engine_;
     bool                                             sessionActive_  = false;
     std::vector<patterns::observer::ISessionObserver*> observers_;
     std::vector<patterns::strategy::SortStrategyId>    allowedStrategies_;
