@@ -17,7 +17,7 @@ class BasicEngine : public patterns::observer::ISessionObserver {
 public:
     explicit BasicEngine(std::filesystem::path manifestPath = {})
         : sortStrategy_(patterns::strategy::SortStrategyFactory::create(
-              patterns::strategy::SortStrategyId::Ascending)) {
+              patterns::strategy::SortStrategyId::Ascending).value()) {
         if (!manifestPath.empty()) {
             manifestWriter_.write(manifestPath, "Engine", "Engine", ENGINE_VERSION_STR);
             manifestWriter_.printManifest(manifestPath);
@@ -88,7 +88,10 @@ public:
                 break;
             case SessionEventType::StrategyChangeRequested:
                 patterns::services::logApp("[Engine] -> recognized: strategy change requested\n");
-                setSortStrategy(SortStrategyFactory::create(event.strategyId));
+                if (auto s = SortStrategyFactory::create(event.strategyId))
+                    setSortStrategy(std::move(*s));
+                else
+                    patterns::services::logApp("[Engine] Unknown sort strategy — ignoring\n");
                 break;
             case SessionEventType::SessionClosing:
                 patterns::services::logApp("[Engine] -> recognized: session closing, cleaning up and stopping\n");

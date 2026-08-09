@@ -126,11 +126,15 @@ void PrintTo(const FactoryParam& p, std::ostream* os) { *os << p.name; }
 class StrategyFactoryTest : public ::testing::TestWithParam<FactoryParam> {};
 
 TEST_P(StrategyFactoryTest, CreatesNonNull) {
-    EXPECT_NE(SortStrategyFactory::create(GetParam().id), nullptr);
+    auto result = SortStrategyFactory::create(GetParam().id);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_NE(result.value(), nullptr);
 }
 
 TEST_P(StrategyFactoryTest, CreatesCorrectType) {
-    EXPECT_EQ(SortStrategyFactory::create(GetParam().id)->id(), GetParam().id);
+    auto result = SortStrategyFactory::create(GetParam().id);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(result.value()->id(), GetParam().id);
 }
 
 INSTANTIATE_TEST_SUITE_P(
