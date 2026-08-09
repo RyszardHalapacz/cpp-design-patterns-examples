@@ -186,9 +186,10 @@ TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
 
     testing::internal::CaptureStdout();
     EngineSessionEstablisher establisher(session, engine);
-    establisher.establish();
+    auto result = establisher.establish();
     std::string out = testing::internal::GetCapturedStdout();
 
+    EXPECT_TRUE(result.has_value());
     EXPECT_NE(out.find("[SessionEstablisher] Starting"), std::string::npos);
     EXPECT_NE(out.find("[Session] Engine connected"), std::string::npos);
     EXPECT_NE(out.find("[Engine] Start"), std::string::npos);

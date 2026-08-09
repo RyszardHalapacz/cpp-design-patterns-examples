@@ -35,7 +35,8 @@ void Application::configure() {
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
     patterns::session::EngineSessionEstablisher establisher(*session_, engine_);
-    establisher.establish();
+    if (auto r = establisher.establish(); !r)
+        logApp("[App] Session establishment failed: " + r.error() + "\n");
 
     configurator_.configureGui(*gui_, session_);
     configurator_.configureAllowedStrategies(*session_, {SortStrategyId::Ascending,

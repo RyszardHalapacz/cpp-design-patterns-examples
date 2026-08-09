@@ -1,5 +1,7 @@
 #pragma once
+#include <expected>
 #include <memory>
+#include <string>
 #include "patterns/engine/Engine.hpp"
 
 namespace patterns::session {
@@ -10,17 +12,18 @@ class SessionManagement;
 // SESSION ESTABLISHER — Template Method
 // Fixed algorithm skeleton for session establishment;
 // subclasses provide concrete steps.
+// C++23: establish() returns std::expected — monadic and_then/or_else chain.
 // ==================================
 class SessionEstablisher {
 public:
     virtual ~SessionEstablisher() = default;
 
-    void establish();  // non-overridable skeleton
+    std::expected<void, std::string> establish();  // non-overridable skeleton
 
 protected:
-    virtual bool checkPreconditions() { return true; }
-    virtual void configure()          {}
-    virtual void connect()      = 0;
+    virtual std::expected<void, std::string> checkPreconditions() { return {}; }
+    virtual void configure()     {}
+    virtual void connect()       = 0;
     virtual void finalizeSetup() = 0;
 };
 
@@ -31,10 +34,10 @@ public:
                              std::shared_ptr<patterns::engine::Engine> engine);
 
 protected:
-    bool checkPreconditions() override;
-    void connect()            override;
-    void configure()          override;
-    void finalizeSetup()      override;
+    std::expected<void, std::string> checkPreconditions() override;
+    void connect()                                        override;
+    void configure()                                      override;
+    void finalizeSetup()                                  override;
 
 private:
     SessionManagement&                        session_;

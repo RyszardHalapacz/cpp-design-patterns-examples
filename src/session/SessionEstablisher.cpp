@@ -7,25 +7,26 @@ namespace patterns::session {
 
 using patterns::services::logApp;
 
-void SessionEstablisher::establish() {
+std::expected<void, std::string> SessionEstablisher::establish() {
     logApp("[SessionEstablisher] Starting session establishment\n");
-    if (!checkPreconditions()) {
-        logApp("[SessionEstablisher] Preconditions not met — aborting\n");
-        return;
-    }
-    connect();
-    configure();
-    finalizeSetup();
-    logApp("[SessionEstablisher] Session established\n");
+    return checkPreconditions()
+        .and_then([this]() -> std::expected<void, std::string> { connect();       return {}; })
+        .and_then([this]() -> std::expected<void, std::string> { configure();     return {}; })
+        .and_then([this]() -> std::expected<void, std::string> { finalizeSetup(); return {}; })
+        .transform([](){ logApp("[SessionEstablisher] Session established\n"); })
+        .or_else([](const std::string& e) -> std::expected<void, std::string> {
+            logApp("[SessionEstablisher] " + e + " — aborting\n");
+            return std::unexpected(e);
+        });
 }
 
 EngineSessionEstablisher::EngineSessionEstablisher(SessionManagement& session,
                                                    std::shared_ptr<patterns::engine::Engine> engine)
     : session_(session), engine_(std::move(engine)) {}
 
-bool EngineSessionEstablisher::checkPreconditions() {
+std::expected<void, std::string> EngineSessionEstablisher::checkPreconditions() {
     logApp("[EngineSessionEstablisher] Checking engine availability\n");
-    return true;
+    return {};
 }
 
 void EngineSessionEstablisher::connect() {
