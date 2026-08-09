@@ -11,8 +11,6 @@ using patterns::observer::SessionEvent;
 using patterns::observer::SessionEventType;
 using patterns::strategy::SortStrategyId;
 using patterns::strategy::sortStrategyIdName;
-using patterns::gui::CommandBatch;
-using patterns::gui::CommandType;
 using patterns::services::logApp;
 
 void SessionManagement::connectToEngine(std::shared_ptr<patterns::engine::Engine> engine) {
@@ -57,21 +55,6 @@ void SessionManagement::printDataFromGui() {
     notify(SessionEvent{SessionEventType::PrintRequested, {}, 0});
 }
 
-void SessionManagement::executeBatch(const CommandBatch& batch) {
-    std::ostringstream header;
-    header << "[Session] Received command batch (" << batch.size()
-           << ") — executing in order\n";
-    logApp(header.str());
-
-    for (const auto& cmd : batch) {
-        switch (cmd.type) {
-            case CommandType::AddVector:  addVectorFromGui(cmd.vectorData); break;
-            case CommandType::SortVector: sortVectorFromGui(cmd.index);      break;
-            case CommandType::PrintData:  printDataFromGui();                break;
-        }
-    }
-    logApp("[Session] Command batch executed\n");
-}
 
 void SessionManagement::setSortStrategyFromGui(SortStrategyId id) {
     if (engine_.expired()) { logApp("[Session] No Engine\n"); return; }

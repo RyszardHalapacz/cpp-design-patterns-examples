@@ -291,30 +291,8 @@ TEST_F(SessionTest, AuditObserverLogsStrategyChangeRequested) {
     delete audit;
 }
 
-TEST_F(SessionTest, ExecuteBatchDispatchesAllCommandTypes) {
-    auto engine = std::make_shared<patterns::engine::Engine>();
-    SessionManagement session;
-
-    testing::internal::CaptureStdout();
-    session.connectToEngine(engine);
-    session.openSession();
-
-    using patterns::gui::Command;
-    using patterns::gui::CommandType;
-    using patterns::gui::CommandBatch;
-
-    CommandBatch batch = {
-        Command{CommandType::AddVector,  {3, 1, 2}, 0},
-        Command{CommandType::SortVector, {},        0},
-        Command{CommandType::PrintData,  {},        0},
-    };
-    session.executeBatch(batch);
-    std::string out = testing::internal::GetCapturedStdout();
-    EXPECT_NE(out.find("command batch"), std::string::npos);
-    EXPECT_NE(out.find("GUI wants to add vector"), std::string::npos);
-    EXPECT_NE(out.find("GUI wants to sort"), std::string::npos);
-    EXPECT_NE(out.find("GUI wants to print"), std::string::npos);
-}
+// ExecuteBatch moved to DummyGui::flushBatch — batch is executed via ICommand::execute()
+// Coverage for batch execution lives in test_gui.cpp (FlushBatchExecutesCommands)
 
 TEST_F(SessionTest, SetSortStrategyFromGuiWithNoEngineLogsError) {
     SessionManagement session; // no engine connected

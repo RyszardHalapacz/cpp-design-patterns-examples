@@ -19,7 +19,6 @@ namespace patterns::gui {
 class DummyGuiAdapter : public IGui {
 public:
     explicit DummyGuiAdapter(std::filesystem::path manifestPath = {});
-    ~DummyGuiAdapter() override;
 
     // ── Wiring API (called by Configurator) ───────────────────────────────
     void connectAddVector      (DummyGui::AddVectorFunc       f);
@@ -41,7 +40,7 @@ public:
     CommandBatch buildBatch();
 
 private:
-    DummyGui* gui_;
+    std::unique_ptr<DummyGui> gui_;  // default_delete<DummyGui> calls deleteGUI
 };
 
 } // namespace patterns::gui

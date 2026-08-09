@@ -2,25 +2,23 @@
 
 namespace patterns::gui {
 
-CommandBatchBuilder& CommandBatchBuilder::addVector(const std::vector<int>& vec) {
-    commands_.push_back(Command{CommandType::AddVector, vec, 0});
+CommandBatchBuilder& CommandBatchBuilder::addVector(AddVectorFn fn, const std::vector<int>& vec) {
+    commands_.push_back(std::make_unique<AddVectorCommand>(std::move(fn), vec));
     return *this;
 }
 
-CommandBatchBuilder& CommandBatchBuilder::sortVector(size_t index) {
-    commands_.push_back(Command{CommandType::SortVector, {}, index});
+CommandBatchBuilder& CommandBatchBuilder::sortVector(SortVectorFn fn, size_t index) {
+    commands_.push_back(std::make_unique<SortVectorCommand>(std::move(fn), index));
     return *this;
 }
 
-CommandBatchBuilder& CommandBatchBuilder::printData() {
-    commands_.push_back(Command{CommandType::PrintData, {}, 0});
+CommandBatchBuilder& CommandBatchBuilder::printData(PrintDataFn fn) {
+    commands_.push_back(std::make_unique<PrintDataCommand>(std::move(fn)));
     return *this;
 }
 
 CommandBatch CommandBatchBuilder::build() {
-    CommandBatch result = std::move(commands_);
-    commands_.clear();
-    return result;
+    return std::move(commands_);
 }
 
 } // namespace patterns::gui

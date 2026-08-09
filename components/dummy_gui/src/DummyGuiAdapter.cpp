@@ -5,10 +5,6 @@ namespace patterns::gui {
 DummyGuiAdapter::DummyGuiAdapter(std::filesystem::path manifestPath)
     : gui_(makeGUI(std::move(manifestPath))) {}
 
-DummyGuiAdapter::~DummyGuiAdapter() {
-    deleteGUI(gui_);
-}
-
 void DummyGuiAdapter::connectAddVector(DummyGui::AddVectorFunc f) {
     gui_->connectAddVector(std::move(f));
 }

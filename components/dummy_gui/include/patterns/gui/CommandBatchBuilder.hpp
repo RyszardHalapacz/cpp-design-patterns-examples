@@ -1,17 +1,22 @@
 #pragma once
-#include "patterns/gui/Command.hpp"
+#include "patterns/gui/ICommand.hpp"
 
 namespace patterns::gui {
 
 // ==================================
 // COMMAND BATCH BUILDER
-// Fluent builder — GUI collects commands instead of sending them immediately.
+// Fluent builder — GUI collects ICommand objects instead of sending immediately.
+// Each method receives the callback + data and creates the concrete command.
 // ==================================
 class CommandBatchBuilder {
 public:
-    CommandBatchBuilder& addVector(const std::vector<int>& vec);
-    CommandBatchBuilder& sortVector(size_t index);
-    CommandBatchBuilder& printData();
+    using AddVectorFn  = AddVectorCommand::Fn;
+    using SortVectorFn = SortVectorCommand::Fn;
+    using PrintDataFn  = PrintDataCommand::Fn;
+
+    CommandBatchBuilder& addVector(AddVectorFn fn, const std::vector<int>& vec);
+    CommandBatchBuilder& sortVector(SortVectorFn fn, size_t index);
+    CommandBatchBuilder& printData(PrintDataFn fn);
 
     CommandBatch build();  // returns finished batch and clears builder
 

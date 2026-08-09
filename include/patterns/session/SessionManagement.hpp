@@ -3,7 +3,6 @@
 #include <vector>
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
-#include "patterns/gui/Command.hpp"
 
 #include "patterns/engine/Engine.hpp"
 
@@ -22,7 +21,6 @@ public:
     void addVectorFromGui(const std::vector<int>& vec);
     void sortVectorFromGui(size_t index);
     void printDataFromGui();
-    void executeBatch(const patterns::gui::CommandBatch& batch);
     void setSortStrategyFromGui(patterns::strategy::SortStrategyId id);
     void setAllowedStrategies(std::vector<patterns::strategy::SortStrategyId> allowed);
 
