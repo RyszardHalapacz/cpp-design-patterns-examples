@@ -3,6 +3,7 @@
 #include <memory>
 #include "patterns/engine/Engine.hpp"
 #include "patterns/session/SessionManagement.hpp"
+#include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/gui/DummyGui.hpp"
 #include "patterns/config/Configurator.hpp"
 
@@ -24,6 +25,7 @@ private:
     std::filesystem::path                                 exeDir_;
     std::unique_ptr<patterns::engine::Engine>             engine_;
     std::shared_ptr<patterns::session::SessionManagement> session_;
+    std::shared_ptr<patterns::session::SessionAuditObserver> audit_;
     std::unique_ptr<patterns::gui::DummyGui>              gui_;
     patterns::config::Configurator                        configurator_;
 };

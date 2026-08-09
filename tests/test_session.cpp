@@ -289,7 +289,7 @@ TEST_F(SessionTest, SetSortStrategyFromGuiWithNoEngineLogsError) {
     EXPECT_NE(out.find("No Engine"), std::string::npos);
 }
 
-TEST_F(SessionTest, AuditObserverDeletesItselfOnSessionClosing) {
+TEST_F(SessionTest, AuditObserverOwnedExternallyOnSessionClosing) {
     patterns::engine::Engine engine;
     SessionManagement session;
 
@@ -297,13 +297,13 @@ TEST_F(SessionTest, AuditObserverDeletesItselfOnSessionClosing) {
     session.connectToEngine(engine);
     session.openSession();
 
-    // Allocate on heap — will be deleted by delete this inside onSessionEvent
-    auto* audit = new SessionAuditObserver();
-    session.attach(audit);
+    // Owned by caller — lifetime independent of session
+    auto audit = std::make_shared<SessionAuditObserver>();
+    session.attach(audit.get());
 
-    // closeSession fires SessionClosing → audit calls delete this, engine calls stop()
     session.closeSession();
     std::string out = testing::internal::GetCapturedStdout();
     EXPECT_NE(out.find("[Audit] Session closing"), std::string::npos);
-    // If we reach here without crash, delete this worked correctly
+    // audit still alive — owned by this scope, not by session
+    EXPECT_NE(audit, nullptr);
 }

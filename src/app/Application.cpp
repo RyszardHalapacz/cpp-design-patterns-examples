@@ -41,10 +41,9 @@ void Application::configure() {
     configurator_.configureAllowedStrategies(*session_, {SortStrategyId::Ascending,
                                                          SortStrategyId::Descending});
 
-    // OBSERVER — extra observer allocated on the heap;
-    // destroys itself when session closes (SessionClosing -> delete this)
-    auto* audit = new patterns::session::SessionAuditObserver();
-    session_->attach(audit);
+    // OBSERVER — owned by Application; lifetime no longer tied to session
+    audit_ = std::make_shared<patterns::session::SessionAuditObserver>();
+    session_->attach(audit_.get());
 }
 
 void Application::run() {
