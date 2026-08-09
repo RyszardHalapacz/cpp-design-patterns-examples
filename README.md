@@ -21,7 +21,9 @@ Every pattern has its own classes, unit tests, and lecture notes.
 | **Observer** | `ISessionObserver`, `Engine`, `SessionAuditObserver` | `components/core/include/patterns/observer/`, `include/patterns/session/` |
 | **Facade** | `SessionManagement` | `include/patterns/session/SessionManagement.hpp` |
 | **Template Method** | `SessionEstablisher`, `EngineSessionEstablisher` | `include/patterns/session/SessionEstablisher.hpp` |
-| **Builder** | `CommandBatchBuilder`, `DummyGui` | `components/dummy_gui/include/patterns/gui/` |
+| **Builder** | `CommandBatchBuilder` | `components/dummy_gui/include/patterns/gui/CommandBatchBuilder.hpp` |
+| **Command** | `ICommand`, `AddVectorCommand`, `SortVectorCommand`, `PrintDataCommand` | `components/core/include/patterns/gui/ICommand.hpp` |
+| **Adapter** | `DummyGuiAdapter`, `IGui` | `components/dummy_gui/include/patterns/gui/DummyGuiAdapter.hpp` |
 
 ---
 
@@ -44,22 +46,22 @@ Every pattern has its own classes, unit tests, and lecture notes.
 - `TEST_F` — fixture-based tests with shared `SetUp`
 - `TEST_P` — parameterized tests (one test body, multiple data sets)
 - Stdout capture via `testing::internal::CaptureStdout()`
-- 75 tests across 6 test files
+- 77 tests across 6 test files
 
 ### C++23 features
-- **`std::expected<T, E>`** — `ServiceLocator` methods return `expected` instead of throwing; callers handle errors explicitly
-- **Monadic operations** — `.transform()` on `expected` for concise error propagation (e.g. `logFile`)
-- No exceptions in the service layer — all error paths are type-safe and composable
+- **`std::expected<T, E>`** — `ServiceLocator` and `SortStrategyFactory` return `expected` instead of throwing; callers handle errors explicitly
+- **Monadic operations** — `and_then`, `transform`, `or_else` chained in `SessionEstablisher::establish()` for a clean, linear error-propagation pipeline
+- No exceptions in the service or factory layer — all error paths are type-safe and composable
 
 ### C++ templates & idioms
 - `ServiceLocator` using `std::type_index` as a runtime type key
 - `static_assert` for compile-time constraint checking
 - **Meyers Singleton** — `static` local variable inside `instance()`
-- **`delete this`** — `SessionAuditObserver` destroys itself when the session closes
-- **Member function pointers** — `DummyGui` stores pointers to `SessionManagement` methods
-- **`std::weak_ptr`** — `DummyGui` holds a non-owning reference to `SessionManagement`; detects expiry before every call
-- **`std::default_delete` specialization** — lets `std::unique_ptr<DummyGui>` call `deleteGUI()` automatically, no custom deleter at every call site
-- **C-style factory API** (`makeGUI` / `deleteGUI`) — simulates legacy C library interfaces (SDL, curl pattern)
+- **`std::function` callbacks** — `DummyGui` stores `std::function` slots instead of raw session pointers; `Configurator` wires lambdas that capture `weak_ptr<SessionManagement>`
+- **`std::weak_ptr` observer collection** — `SessionManagement` holds `vector<weak_ptr<ISessionObserver>>`; expired observers are pruned automatically and duplicates are rejected
+- **Ownership model** — `Application` owns all top-level objects as `shared_ptr` / `unique_ptr`; `SessionManagement` holds `weak_ptr<Engine>`; `SessionAuditObserver` lifetime is controlled by `Application`, not the session
+- **Rule of Zero** — `DummyGuiAdapter` has no destructor; `unique_ptr<DummyGui>` calls `deleteGUI()` automatically via a `std::default_delete<DummyGui>` specialization
+- **C-style factory API** (`makeGUI` / `deleteGUI`) — simulates legacy C library interfaces (SDL, curl pattern); wrapped behind `IGui` by the Adapter
 
 ---
 
@@ -73,16 +75,17 @@ wzorce/
 │   │   │   ├── services/          # Logger, FileLogger, DoSomething, ServiceLocator (C++23)
 │   │   │   ├── strategy/          # ISortStrategy, 3 implementations, SortStrategyFactory
 │   │   │   ├── observer/          # ISessionObserver, SessionEvent
-│   │   │   ├── gui/               # Command (shared type)
+│   │   │   ├── gui/               # IGui, ICommand + concrete commands
 │   │   │   └── manifest/          # ManifestWriter
 │   │   └── src/
 │   └── dummy_gui/                 # Static library — GUI component
 │       ├── include/patterns/
-│       │   ├── gui/               # CommandBatchBuilder, DummyGui + C-style API
+│       │   ├── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
 │       │   └── config/            # Configurator
 │       ├── src/
-│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGui, Configurator)
+│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter, Configurator)
 ├── include/patterns/              # App-level headers
+│   ├── app/                       # Application (configure + run)
 │   ├── engine/                    # Engine (BasicEngine<Writer>)
 │   └── session/                   # SessionManagement, SessionEstablisher, SessionAuditObserver
 ├── src/                           # App-level implementations + main.cpp
@@ -91,7 +94,7 @@ wzorce/
 │   ├── test_strategy.cpp          # All sort strategies + factory
 │   ├── test_engine.cpp            # Engine lifecycle and session events
 │   ├── test_session.cpp           # SessionManagement, SessionEstablisher, SessionAuditObserver
-│   └── test_gui_owning.cpp        # unique_ptr<DummyGui> via default_delete specialisation
+│   └── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> and IGui virtual dispatch
 └── docs/
     ├── en/
     │   ├── patterns_theory/       # Lecture notes in English (Markdown)

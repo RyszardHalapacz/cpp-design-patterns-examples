@@ -21,7 +21,9 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 | **Observer** | `ISessionObserver`, `Engine`, `SessionAuditObserver` | `components/core/include/patterns/observer/`, `include/patterns/session/` |
 | **Facade** | `SessionManagement` | `include/patterns/session/SessionManagement.hpp` |
 | **Template Method** | `SessionEstablisher`, `EngineSessionEstablisher` | `include/patterns/session/SessionEstablisher.hpp` |
-| **Builder** | `CommandBatchBuilder`, `DummyGui` | `components/dummy_gui/include/patterns/gui/` |
+| **Builder** | `CommandBatchBuilder` | `components/dummy_gui/include/patterns/gui/CommandBatchBuilder.hpp` |
+| **Command** | `ICommand`, `AddVectorCommand`, `SortVectorCommand`, `PrintDataCommand` | `components/core/include/patterns/gui/ICommand.hpp` |
+| **Adapter** | `DummyGuiAdapter`, `IGui` | `components/dummy_gui/include/patterns/gui/DummyGuiAdapter.hpp` |
 
 ---
 
@@ -44,22 +46,22 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 - `TEST_F` — testy z fixture (współdzielony `SetUp`)
 - `TEST_P` — testy sparametryzowane (jeden kod testu, wiele zestawów danych)
 - Przechwytywanie `stdout` przez `testing::internal::CaptureStdout()`
-- 75 testów w 6 plikach testowych
+- 77 testów w 6 plikach testowych
 
 ### Cechy C++23
-- **`std::expected<T, E>`** — metody `ServiceLocator` zwracają `expected` zamiast rzucać wyjątkami; wywołujący obsługuje błędy jawnie
-- **Operacje monadyczne** — `.transform()` na `expected` do zwięzłej propagacji błędów (np. `logFile`)
-- Brak wyjątków w warstwie serwisów — wszystkie ścieżki błędów są typowo bezpieczne i kompozytowalne
+- **`std::expected<T, E>`** — metody `ServiceLocator` i `SortStrategyFactory` zwracają `expected` zamiast rzucać wyjątkami; wywołujący obsługuje błędy jawnie
+- **Operacje monadyczne** — `and_then`, `transform`, `or_else` połączone łańcuchem w `SessionEstablisher::establish()` tworzą liniowy, czytelny potok obsługi błędów
+- Brak wyjątków w warstwie serwisów i fabryk — wszystkie ścieżki błędów są typowo bezpieczne i kompozytowalne
 
 ### Szablony i idiomy C++
 - `ServiceLocator` z `std::type_index` jako kluczem rejestru w czasie wykonania
 - `static_assert` do weryfikacji constraintów w czasie kompilacji
 - **Meyers Singleton** — `static` lokalna zmienna w metodzie `instance()`
-- **`delete this`** — `SessionAuditObserver` niszczy się sam po zakończeniu sesji
-- **Wskaźniki do metod składowych** — `DummyGui` przechowuje wskaźniki do metod `SessionManagement`
-- **`std::weak_ptr`** — `DummyGui` trzyma nieposiadającą referencję do `SessionManagement`; sprawdza wygaśnięcie przed każdą operacją
-- **Specjalizacja `std::default_delete`** — pozwala `std::unique_ptr<DummyGui>` automatycznie wywołać `deleteGUI()`, bez własnego deletera w każdym miejscu użycia
-- **C-style API fabryki** (`makeGUI` / `deleteGUI`) — symulacja interfejsów bibliotek C (wzorzec SDL, curl)
+- **Callbacki `std::function`** — `DummyGui` przechowuje sloty `std::function` zamiast surowych wskaźników do sesji; `Configurator` podpina lambdy przechwytujące `weak_ptr<SessionManagement>`
+- **Kolekcja obserwatorów `weak_ptr`** — `SessionManagement` trzyma `vector<weak_ptr<ISessionObserver>>`; wygasłe obserwatory są automatycznie usuwane, a duplikaty odrzucane
+- **Model własności** — `Application` jest właścicielem wszystkich obiektów najwyższego poziomu jako `shared_ptr` / `unique_ptr`; `SessionManagement` trzyma `weak_ptr<Engine>`; czas życia `SessionAuditObserver` jest kontrolowany przez `Application`, nie przez sesję
+- **Rule of Zero** — `DummyGuiAdapter` nie ma destruktora; `unique_ptr<DummyGui>` automatycznie wywołuje `deleteGUI()` dzięki specjalizacji `std::default_delete<DummyGui>`
+- **C-style API fabryki** (`makeGUI` / `deleteGUI`) — symulacja interfejsów bibliotek C (wzorzec SDL, curl); ukryta za `IGui` przez Adapter
 
 ---
 
@@ -73,16 +75,17 @@ wzorce/
 │   │   │   ├── services/          # Logger, FileLogger, DoSomething, ServiceLocator (C++23)
 │   │   │   ├── strategy/          # ISortStrategy, 3 implementacje, SortStrategyFactory
 │   │   │   ├── observer/          # ISessionObserver, SessionEvent
-│   │   │   ├── gui/               # Command (typ współdzielony)
+│   │   │   ├── gui/               # IGui, ICommand + konkretne komendy
 │   │   │   └── manifest/          # ManifestWriter
 │   │   └── src/
 │   └── dummy_gui/                 # Biblioteka statyczna — komponent GUI
 │       ├── include/patterns/
-│       │   ├── gui/               # CommandBatchBuilder, DummyGui + C-style API
+│       │   ├── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
 │       │   └── config/            # Configurator
 │       ├── src/
-│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGui, Configurator)
+│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter, Configurator)
 ├── include/patterns/              # Nagłówki na poziomie aplikacji
+│   ├── app/                       # Application (configure + run)
 │   ├── engine/                    # Engine (BasicEngine<Writer>)
 │   └── session/                   # SessionManagement, SessionEstablisher, SessionAuditObserver
 ├── src/                           # Implementacje aplikacji + main.cpp
@@ -91,7 +94,7 @@ wzorce/
 │   ├── test_strategy.cpp          # Wszystkie strategie sortowania + fabryka
 │   ├── test_engine.cpp            # Cykl życia Engine i zdarzenia sesji
 │   ├── test_session.cpp           # SessionManagement, SessionEstablisher, SessionAuditObserver
-│   └── test_gui_owning.cpp        # unique_ptr<DummyGui> przez specjalizację default_delete
+│   └── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> i dispatch wirtualny przez IGui
 └── docs/
     ├── en/
     │   ├── patterns_theory/       # Wykłady po angielsku (Markdown)
