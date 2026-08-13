@@ -1,4 +1,5 @@
 #pragma once
+#include <concepts>
 #include <expected>
 #include <functional>
 #include <iostream>
@@ -13,6 +14,12 @@
 #include "DoSomething.hpp"
 
 namespace patterns::services {
+
+// Concept: TService must publicly derive from IService.
+// Used in place of static_assert to catch constraint violations
+// at the template declaration site with a cleaner compiler error.
+template <typename TService>
+concept ServiceType = std::derived_from<TService, IService>;
 
 // ==================================
 // SERVICE LOCATOR ERROR
@@ -49,6 +56,18 @@ inline std::string serviceLocatorErrorMessage(const ServiceLocatorError& error) 
 // SERVICE LOCATOR
 // Generic service registry indexed by type (std::type_index).
 // Singleton — one instance per program.
+//
+// NOTE: Service Locator is widely considered an anti-pattern.
+// The core problem is hidden dependencies: looking at Engine's constructor
+// you cannot tell it needs a Logger — you only discover that by reading
+// through the method bodies. This makes the class harder to understand,
+// test (every test must pre-configure the global locator), and reuse.
+// The idiomatic alternative is Dependency Injection — pass Logger (or
+// ILogger) explicitly through the constructor so every dependency is
+// visible at the call site.
+// Service Locator is included here intentionally to demonstrate the
+// pattern and contrast it with DI; it would not be the first choice
+// in a production codebase.
 // ==================================
 class ServiceLocator {
 public:
@@ -62,11 +81,9 @@ public:
 
     // Registration by template parameter (compile time).
     // Returns unexpected(NullService) if the shared_ptr is empty.
-    template <typename TService>
+    template <ServiceType TService>
     std::expected<void, ServiceLocatorError>
     provide(std::shared_ptr<TService> service) {
-        static_assert(std::is_base_of_v<IService, TService>,
-                      "TService must inherit from IService");
         if (!service) {
             return std::unexpected(ServiceLocatorError{
                 ServiceLocatorErrorCode::NullService,
@@ -79,11 +96,9 @@ public:
 
     // Retrieval by template parameter.
     // Returns unexpected(ServiceNotFound) when not registered.
-    template <typename TService>
+    template <ServiceType TService>
     std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
     tryGet() {
-        static_assert(std::is_base_of_v<IService, TService>,
-                      "TService must inherit from IService");
         const std::type_index key(typeid(TService));
         const auto it = services_.find(key);
         if (it == services_.end()) {
@@ -112,11 +127,9 @@ public:
 
     // Runtime retrieval with dynamic_cast type check.
     // Returns unexpected(ServiceNotFound or InvalidServiceType).
-    template <typename TService>
+    template <ServiceType TService>
     std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
     tryGetRuntime() {
-        static_assert(std::is_base_of_v<IService, TService>,
-                      "TService must inherit from IService");
         const std::type_index key(typeid(TService));
         const auto it = services_.find(key);
         if (it == services_.end()) {
