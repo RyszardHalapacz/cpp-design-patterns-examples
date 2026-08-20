@@ -12,6 +12,17 @@
 
 namespace patterns::gui {
 
+// ─── Forward declarations ─────────────────────────────────────────────────────
+template<typename Writer>
+class BasicDummyGui;
+
+template<typename Writer = patterns::manifest::ComponentManifestWriter>
+BasicDummyGui<Writer>* makeGUI(std::filesystem::path manifestPath = {});
+
+template<typename Writer>
+void deleteGUI(BasicDummyGui<Writer>* gui);
+
+// ─────────────────────────────────────────────────────────────────────────────
 template<typename Writer = patterns::manifest::ComponentManifestWriter>
 class BasicDummyGui {
 public:
@@ -20,8 +31,8 @@ public:
     using PrintDataFunc       = std::function<void()>;
     using SetSortStrategyFunc = std::function<void(patterns::strategy::SortStrategyId)>;
 
-    friend BasicDummyGui* makeGUI(std::filesystem::path manifestPath);
-    friend void           deleteGUI(BasicDummyGui* gui);
+    friend BasicDummyGui<Writer>* makeGUI<Writer>(std::filesystem::path);
+    friend void                   deleteGUI<Writer>(BasicDummyGui<Writer>*);
 
     void connectAddVector      (AddVectorFunc       f) { addVectorFunc_       = std::move(f); }
     void connectSortVector     (SortVectorFunc      f) { sortVectorFunc_      = std::move(f); }
@@ -105,11 +116,13 @@ private:
 using DummyGui = BasicDummyGui<>;
 
 // ─── C-style factory functions ────────────────────────────────────────────────
-inline DummyGui* makeGUI(std::filesystem::path manifestPath = {}) {
-    return new DummyGui(std::move(manifestPath));
+template<typename Writer>
+BasicDummyGui<Writer>* makeGUI(std::filesystem::path manifestPath) {
+    return new BasicDummyGui<Writer>(std::move(manifestPath));
 }
 
-inline void deleteGUI(DummyGui* gui) {
+template<typename Writer>
+void deleteGUI(BasicDummyGui<Writer>* gui) {
     delete gui;
 }
 
@@ -117,9 +130,9 @@ inline void deleteGUI(DummyGui* gui) {
 
 // ─── unique_ptr support ───────────────────────────────────────────────────────
 namespace std {
-template<>
-struct default_delete<patterns::gui::DummyGui> {
-    void operator()(patterns::gui::DummyGui* gui) const {
+template<typename Writer>
+struct default_delete<patterns::gui::BasicDummyGui<Writer>> {
+    void operator()(patterns::gui::BasicDummyGui<Writer>* gui) const {
         patterns::gui::deleteGUI(gui);
     }
 };

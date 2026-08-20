@@ -3,7 +3,7 @@
 namespace patterns::gui {
 
 DummyGuiAdapter::DummyGuiAdapter(std::filesystem::path manifestPath)
-    : gui_(makeGUI(std::move(manifestPath))) {}
+    : gui_(makeGUI<>(std::move(manifestPath))) {}
 
 void DummyGuiAdapter::connectAddVector(DummyGui::AddVectorFunc f) {
     gui_->connectAddVector(std::move(f));
