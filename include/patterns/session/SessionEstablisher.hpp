@@ -22,9 +22,9 @@ public:
 
 protected:
     virtual std::expected<void, std::string> checkPreconditions() { return {}; }
-    virtual void configure()     {}
-    virtual void connect()       = 0;
-    virtual void finalizeSetup() = 0;
+    virtual std::expected<void, std::string> configure()          { return {}; }
+    virtual std::expected<void, std::string> connect()       = 0;
+    virtual std::expected<void, std::string> finalizeSetup() = 0;
 };
 
 // Concrete implementation: connects SessionManagement to Engine
@@ -35,9 +35,9 @@ public:
 
 protected:
     std::expected<void, std::string> checkPreconditions() override;
-    void connect()                                        override;
-    void configure()                                      override;
-    void finalizeSetup()                                  override;
+    std::expected<void, std::string> connect()            override;
+    std::expected<void, std::string> configure()          override;
+    std::expected<void, std::string> finalizeSetup()      override;
 
 private:
     SessionManagement&                        session_;

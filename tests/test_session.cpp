@@ -231,6 +231,22 @@ TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
     EXPECT_NE(out.find("[SessionEstablisher] Session established"), std::string::npos);
 }
 
+TEST_F(SessionTest, EngineSessionEstablisher_NullEngine_ReturnsError) {
+    std::shared_ptr<patterns::engine::Engine> noEngine;
+    SessionManagement session;
+
+    testing::internal::CaptureStdout();
+    EngineSessionEstablisher establisher(session, noEngine);
+    auto result = establisher.establish();
+    std::string out = testing::internal::GetCapturedStdout();
+
+    EXPECT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), "Engine not available");
+    EXPECT_NE(out.find("[SessionEstablisher] Engine not available — aborting"), std::string::npos);
+    EXPECT_EQ(out.find("[Session] Engine connected"), std::string::npos);
+    EXPECT_EQ(out.find("[SessionEstablisher] Session established"), std::string::npos);
+}
+
 // ─── SessionAuditObserver ────────────────────────────────────────────────────
 
 TEST_F(SessionTest, AuditObserverLogsVectorAdded) {
