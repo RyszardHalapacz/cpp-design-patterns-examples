@@ -37,7 +37,7 @@ public:
     void  flushBatch          ()                                      override;
 
     // ── Extended API (not in IGui, used by tests) ─────────────────────────
-    CommandBatch buildBatch();
+    [[nodiscard]] CommandBatch buildBatch();
 
 private:
     std::unique_ptr<DummyGui> gui_;  // default_delete<DummyGui> calls deleteGUI

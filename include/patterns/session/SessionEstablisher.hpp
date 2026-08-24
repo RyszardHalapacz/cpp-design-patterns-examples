@@ -18,13 +18,13 @@ class SessionEstablisher {
 public:
     virtual ~SessionEstablisher() = default;
 
-    std::expected<void, std::string> establish();  // non-overridable skeleton
+    [[nodiscard]] std::expected<void, std::string> establish();  // non-overridable skeleton
 
 protected:
-    virtual std::expected<void, std::string> checkPreconditions() { return {}; }
-    virtual std::expected<void, std::string> configure()          { return {}; }
-    virtual std::expected<void, std::string> connect()       = 0;
-    virtual std::expected<void, std::string> finalizeSetup() = 0;
+    [[nodiscard]] virtual std::expected<void, std::string> checkPreconditions() { return {}; }
+    [[nodiscard]] virtual std::expected<void, std::string> configure()          { return {}; }
+    [[nodiscard]] virtual std::expected<void, std::string> connect()       = 0;
+    [[nodiscard]] virtual std::expected<void, std::string> finalizeSetup() = 0;
 };
 
 // Concrete implementation: connects SessionManagement to Engine
@@ -34,10 +34,10 @@ public:
                              std::shared_ptr<patterns::engine::Engine> engine);
 
 protected:
-    std::expected<void, std::string> checkPreconditions() override;
-    std::expected<void, std::string> connect()            override;
-    std::expected<void, std::string> configure()          override;
-    std::expected<void, std::string> finalizeSetup()      override;
+    [[nodiscard]] std::expected<void, std::string> checkPreconditions() override;
+    [[nodiscard]] std::expected<void, std::string> connect()            override;
+    [[nodiscard]] std::expected<void, std::string> configure()          override;
+    [[nodiscard]] std::expected<void, std::string> finalizeSetup()      override;
 
 private:
     SessionManagement&                        session_;

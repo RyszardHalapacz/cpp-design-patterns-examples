@@ -18,7 +18,7 @@ public:
     CommandBatchBuilder& sortVector(SortVectorFn fn, size_t index);
     CommandBatchBuilder& printData(PrintDataFn fn);
 
-    CommandBatch build();  // returns finished batch and clears builder
+    [[nodiscard]] CommandBatch build();  // returns finished batch and clears builder
 
 private:
     CommandBatch commands_;

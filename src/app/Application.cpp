@@ -16,11 +16,11 @@ Application::Application(std::filesystem::path exeDir)
 
 void Application::configure() {
     // SERVICE LOCATOR — register services once at startup
-    ServiceLocator::instance().provide<Logger>    (std::make_shared<Logger>());
-    ServiceLocator::instance().provide<FileLogger>(std::make_shared<FileLogger>("engine_log.txt"));
-    ServiceLocator::instance().provideRuntime     (std::make_shared<DoSomething>());
+    [[maybe_unused]] auto loggerReg      = ServiceLocator::instance().provide<Logger>    (std::make_shared<Logger>());
+    [[maybe_unused]] auto fileLoggerReg  = ServiceLocator::instance().provide<FileLogger>(std::make_shared<FileLogger>("engine_log.txt"));
+    [[maybe_unused]] auto doSomethingReg = ServiceLocator::instance().provideRuntime     (std::make_shared<DoSomething>());
 
-    logFile("=== Program start ===\n");
+    [[maybe_unused]] auto logStartResult = logFile("=== Program start ===\n");
     if (auto r = appDoSomethingByPointer()) r->get().do_();
 
     patterns::manifest::ComponentManifestWriter appWriter;
@@ -82,7 +82,7 @@ void Application::run() {
 
     gui_->clickAddVector({100, 200});  // session closed
 
-    logFile("=== Program end ===\n");
+    [[maybe_unused]] auto logEndResult = logFile("=== Program end ===\n");
 }
 
 } // namespace patterns::app

@@ -84,7 +84,7 @@ public:
         return *this;
     }
 
-    CommandBatch buildBatch() {
+    [[nodiscard]] CommandBatch buildBatch() {
         patterns::services::logApp("[GUI] Closing command batch, ready to send\n");
         return batchBuilder_.build();
     }

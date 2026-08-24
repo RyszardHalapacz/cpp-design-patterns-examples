@@ -82,7 +82,7 @@ public:
     // Registration by template parameter (compile time).
     // Returns unexpected(NullService) if the shared_ptr is empty.
     template <ServiceType TService>
-    std::expected<void, ServiceLocatorError>
+    [[nodiscard]] std::expected<void, ServiceLocatorError>
     provide(std::shared_ptr<TService> service) {
         if (!service) {
             return std::unexpected(ServiceLocatorError{
@@ -97,7 +97,7 @@ public:
     // Retrieval by template parameter.
     // Returns unexpected(ServiceNotFound) when not registered.
     template <ServiceType TService>
-    std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
+    [[nodiscard]] std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
     tryGet() {
         const std::type_index key(typeid(TService));
         const auto it = services_.find(key);
@@ -112,7 +112,7 @@ public:
 
     // Registration via RTTI — key resolved from the actual dynamic type.
     // Returns unexpected(NullService) if the shared_ptr is empty.
-    std::expected<void, ServiceLocatorError>
+    [[nodiscard]] std::expected<void, ServiceLocatorError>
     provideRuntime(ServicePtr service) {
         if (!service) {
             return std::unexpected(ServiceLocatorError{
@@ -128,7 +128,7 @@ public:
     // Runtime retrieval with dynamic_cast type check.
     // Returns unexpected(ServiceNotFound or InvalidServiceType).
     template <ServiceType TService>
-    std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
+    [[nodiscard]] std::expected<std::reference_wrapper<TService>, ServiceLocatorError>
     tryGetRuntime() {
         const std::type_index key(typeid(TService));
         const auto it = services_.find(key);
@@ -150,7 +150,7 @@ public:
 
     // Non-template variant — returns shared_ptr<IService> inside expected;
     // the caller is responsible for the final cast.
-    RuntimeGetResult tryGetRuntime(const std::type_index& key) {
+    [[nodiscard]] RuntimeGetResult tryGetRuntime(const std::type_index& key) {
         const auto it = services_.find(key);
         if (it == services_.end()) {
             return std::unexpected(ServiceLocatorError{
@@ -169,23 +169,23 @@ private:
 // ==================================
 // Access shortcuts — return std::expected, not bare references.
 // ==================================
-inline auto appLogger() {
+[[nodiscard]] inline auto appLogger() {
     return ServiceLocator::instance().tryGet<Logger>();
 }
 
-inline auto appFileLogger() {
+[[nodiscard]] inline auto appFileLogger() {
     return ServiceLocator::instance().tryGet<FileLogger>();
 }
 
-inline auto appDoSomething() {
+[[nodiscard]] inline auto appDoSomething() {
     return ServiceLocator::instance().tryGet<DoSomething>();
 }
 
-inline auto appDoSomethingRuntime() {
+[[nodiscard]] inline auto appDoSomethingRuntime() {
     return ServiceLocator::instance().tryGetRuntime<DoSomething>();
 }
 
-inline std::expected<std::reference_wrapper<DoSomething>, ServiceLocatorError>
+[[nodiscard]] inline std::expected<std::reference_wrapper<DoSomething>, ServiceLocatorError>
 appDoSomethingByPointer() {
     auto serviceResult = ServiceLocator::instance().tryGetRuntime(
         std::type_index(typeid(DoSomething)));
@@ -216,7 +216,7 @@ inline void logApp(const std::string& message) {
 
 // logFile — logs via FileLogger using monadic transform; silently no-ops
 // if FileLogger is not registered.
-inline std::expected<void, ServiceLocatorError> logFile(const std::string& message) {
+[[nodiscard]] inline std::expected<void, ServiceLocatorError> logFile(const std::string& message) {
     return appFileLogger().transform(
         [&message](std::reference_wrapper<FileLogger> logger) {
             logger.get().log(message);
