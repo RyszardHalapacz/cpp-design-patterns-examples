@@ -3,6 +3,7 @@
 #include "patterns/session/SessionEstablisher.hpp"
 #include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/strategy/SortStrategyFactory.hpp"
 #include "patterns/manifest/ManifestWriter.hpp"
 #include "patterns/gui/DummyGuiAdapter.hpp"
 
@@ -28,6 +29,7 @@ void Application::configure() {
     appWriter.printManifest(exeDir_ / "application.yml");
 
     engine_  = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
+    factory_ = std::make_shared<patterns::strategy::SortStrategyFactory>();
     session_ = std::make_shared<patterns::session::SessionManagement>();
 
     // ADAPTER — wraps the C-style DummyGui API behind the IGui interface
@@ -37,7 +39,7 @@ void Application::configure() {
     adapter->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
     // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
-    patterns::session::EngineSessionEstablisher establisher(*session_, engine_);
+    patterns::session::EngineSessionEstablisher establisher(*session_, engine_, factory_);
     if (auto r = establisher.establish(); !r)
         logApp("[App] Session establishment failed: " + r.error() + "\n");
 

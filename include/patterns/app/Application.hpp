@@ -6,6 +6,7 @@
 #include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/gui/IGui.hpp"
 #include "patterns/config/Configurator.hpp"
+#include "patterns/strategy/ISortStrategyFactory.hpp"
 
 namespace patterns::app {
 
@@ -23,11 +24,12 @@ public:
 
 private:
     std::filesystem::path                                 exeDir_;
-    std::shared_ptr<patterns::engine::Engine>             engine_;
-    std::shared_ptr<patterns::session::SessionManagement> session_;
-    std::shared_ptr<patterns::session::SessionAuditObserver> audit_;
-    std::unique_ptr<patterns::gui::IGui>                  gui_;
-    patterns::config::Configurator                        configurator_;
+    std::shared_ptr<patterns::engine::Engine>                  engine_;
+    std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
+    std::shared_ptr<patterns::session::SessionManagement>      session_;
+    std::shared_ptr<patterns::session::SessionAuditObserver>   audit_;
+    std::unique_ptr<patterns::gui::IGui>                       gui_;
+    patterns::config::Configurator                             configurator_;
 };
 
 } // namespace patterns::app

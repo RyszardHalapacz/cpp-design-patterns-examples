@@ -123,16 +123,19 @@ struct FactoryParam {
 
 void PrintTo(const FactoryParam& p, std::ostream* os) { *os << p.name; }
 
-class StrategyFactoryTest : public ::testing::TestWithParam<FactoryParam> {};
+class StrategyFactoryTest : public ::testing::TestWithParam<FactoryParam> {
+protected:
+    SortStrategyFactory factory;
+};
 
 TEST_P(StrategyFactoryTest, CreatesNonNull) {
-    auto result = SortStrategyFactory::create(GetParam().id);
+    auto result = factory.create(GetParam().id);
     ASSERT_TRUE(result.has_value());
     EXPECT_NE(result.value(), nullptr);
 }
 
 TEST_P(StrategyFactoryTest, CreatesCorrectType) {
-    auto result = SortStrategyFactory::create(GetParam().id);
+    auto result = factory.create(GetParam().id);
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(result.value()->id(), GetParam().id);
 }

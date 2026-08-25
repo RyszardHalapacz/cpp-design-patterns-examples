@@ -5,7 +5,7 @@
 #include <vector>
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/strategy/ISortStrategy.hpp"
-#include "patterns/strategy/SortStrategyFactory.hpp"
+#include "patterns/strategy/ISortStrategyFactory.hpp"
 #include "patterns/services/ServiceLocator.hpp"
 #include "patterns/manifest/ManifestWriter.hpp"
 
@@ -15,13 +15,19 @@ namespace patterns::engine {
 template<typename Writer = patterns::manifest::ComponentManifestWriter>
 class BasicEngine : public patterns::observer::ISessionObserver {
 public:
-    explicit BasicEngine(std::filesystem::path manifestPath = {})
-        : sortStrategy_(patterns::strategy::SortStrategyFactory::create(
-              patterns::strategy::SortStrategyId::Ascending).value()) {
+    explicit BasicEngine(std::filesystem::path manifestPath = {}) {
         if (!manifestPath.empty()) {
             manifestWriter_.write(manifestPath, "Engine", "Engine", ENGINE_VERSION_STR);
             manifestWriter_.printManifest(manifestPath);
         }
+    }
+
+    void setFactory(std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory) {
+        factory_ = factory;
+        if (auto s = factory->create(patterns::strategy::SortStrategyId::Ascending))
+            sortStrategy_ = std::move(*s);
+        else
+            patterns::services::logApp("[Engine] Failed to create default strategy\n");
     }
 
     void start() {
@@ -39,6 +45,10 @@ public:
     }
 
     void setSortStrategy(std::unique_ptr<patterns::strategy::ISortStrategy> strategy) {
+        if (!strategy) {
+            patterns::services::logApp("[Engine] setSortStrategy: null strategy ignored\n");
+            return;
+        }
         sortStrategy_ = std::move(strategy);
         std::ostringstream oss;
         oss << "[Engine] Sort strategy set: " << sortStrategy_->name() << "\n";
@@ -48,6 +58,10 @@ public:
     void sortVector(size_t index) {
         if (index >= data_.size()) {
             patterns::services::logApp("[Engine] Invalid vector index\n");
+            return;
+        }
+        if (!sortStrategy_) {
+            patterns::services::logApp("[Engine] No sort strategy — ignoring\n");
             return;
         }
         std::ostringstream oss;
@@ -69,7 +83,6 @@ public:
 
     void onSessionEvent(const patterns::observer::SessionEvent& event) override {
         using patterns::observer::SessionEventType;
-        using patterns::strategy::SortStrategyFactory;
 
         patterns::services::logApp("[Engine] Event received: session state changed\n");
 
@@ -88,10 +101,14 @@ public:
                 break;
             case SessionEventType::StrategyChangeRequested:
                 patterns::services::logApp("[Engine] -> recognized: strategy change requested\n");
-                if (auto s = SortStrategyFactory::create(event.strategyId))
-                    setSortStrategy(std::move(*s));
-                else
-                    patterns::services::logApp("[Engine] Unknown sort strategy — ignoring\n");
+                if (auto f = factory_.lock()) {
+                    if (auto s = f->create(event.strategyId))
+                        setSortStrategy(std::move(*s));
+                    else
+                        patterns::services::logApp("[Engine] Unknown sort strategy — ignoring\n");
+                } else {
+                    patterns::services::logApp("[Engine] Factory not available — ignoring\n");
+                }
                 break;
             case SessionEventType::SessionClosing:
                 patterns::services::logApp("[Engine] -> recognized: session closing, cleaning up and stopping\n");
@@ -104,6 +121,7 @@ private:
     bool                                               running_ = false;
     std::vector<std::vector<int>>                      data_;
     std::unique_ptr<patterns::strategy::ISortStrategy> sortStrategy_;
+    std::weak_ptr<patterns::strategy::ISortStrategyFactory> factory_;
     Writer                                             manifestWriter_;
 };
 

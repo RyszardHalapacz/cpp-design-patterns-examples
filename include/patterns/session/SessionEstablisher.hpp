@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include "patterns/engine/Engine.hpp"
+#include "patterns/strategy/ISortStrategyFactory.hpp"
 
 namespace patterns::session {
 
@@ -31,7 +32,8 @@ protected:
 class EngineSessionEstablisher : public SessionEstablisher {
 public:
     EngineSessionEstablisher(SessionManagement& session,
-                             std::shared_ptr<patterns::engine::Engine> engine);
+                             std::shared_ptr<patterns::engine::Engine> engine,
+                             std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory);
 
 protected:
     [[nodiscard]] std::expected<void, std::string> checkPreconditions() override;
@@ -40,8 +42,9 @@ protected:
     [[nodiscard]] std::expected<void, std::string> finalizeSetup()      override;
 
 private:
-    SessionManagement&                        session_;
-    std::shared_ptr<patterns::engine::Engine> engine_;
+    SessionManagement&                                         session_;
+    std::shared_ptr<patterns::engine::Engine>                  engine_;
+    std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
 };
 
 } // namespace patterns::session

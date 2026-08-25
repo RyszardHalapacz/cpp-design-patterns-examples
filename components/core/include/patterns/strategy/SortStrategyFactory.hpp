@@ -1,14 +1,12 @@
 #pragma once
-#include <expected>
-#include <memory>
-#include <string>
-#include "ISortStrategy.hpp"
+#include "ISortStrategyFactory.hpp"
 
 namespace patterns::strategy {
 
-class SortStrategyFactory {
+class SortStrategyFactory : public ISortStrategyFactory {
 public:
-    [[nodiscard]] static std::expected<std::unique_ptr<ISortStrategy>, std::string> create(SortStrategyId id);
+    [[nodiscard]] std::expected<std::unique_ptr<ISortStrategy>, std::string>
+    create(SortStrategyId id) override;
 };
 
 } // namespace patterns::strategy

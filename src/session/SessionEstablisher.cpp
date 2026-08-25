@@ -21,8 +21,9 @@ std::expected<void, std::string> SessionEstablisher::establish() {
 }
 
 EngineSessionEstablisher::EngineSessionEstablisher(SessionManagement& session,
-                                                   std::shared_ptr<patterns::engine::Engine> engine)
-    : session_(session), engine_(std::move(engine)) {}
+                                                   std::shared_ptr<patterns::engine::Engine> engine,
+                                                   std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory)
+    : session_(session), engine_(std::move(engine)), factory_(std::move(factory)) {}
 
 std::expected<void, std::string> EngineSessionEstablisher::checkPreconditions() {
     logApp("[EngineSessionEstablisher] Checking engine availability\n");
@@ -37,7 +38,8 @@ std::expected<void, std::string> EngineSessionEstablisher::connect() {
 }
 
 std::expected<void, std::string> EngineSessionEstablisher::configure() {
-    logApp("[EngineSessionEstablisher] Default configuration\n");
+    logApp("[EngineSessionEstablisher] Wiring factory to engine\n");
+    engine_->setFactory(factory_);
     return {};
 }
 
