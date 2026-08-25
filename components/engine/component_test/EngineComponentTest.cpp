@@ -33,11 +33,11 @@ public:
     std::vector<EngineSnapshot> snapshots;
 };
 
-// ─── FactoryStub ──────────────────────────────────────────────────────────────
+// ─── FactorySpy ──────────────────────────────────────────────────────────────
 // Implements ISortStrategyFactory — same interface as the real SortStrategyFactory.
 // Delegates to the real factory; records which strategy ids were requested.
 
-class FactoryStub : public ISortStrategyFactory {
+class FactorySpy : public ISortStrategyFactory {
 public:
     [[nodiscard]] std::expected<std::unique_ptr<ISortStrategy>, std::string>
     create(SortStrategyId id) override {
@@ -54,7 +54,7 @@ private:
 // ─── EngineDriver ─────────────────────────────────────────────────────────────
 // Holds a reference to Engine and exposes a table of signals.
 // owner_ is typed as ::testing::Test* so that signal lambdas can cross-cast it
-// to the specific stub type (HistorianSpy*, FactoryStub*) they want to observe.
+// to the specific stub type (HistorianSpy*, FactorySpy*) they want to observe.
 // The cast succeeds only when the concrete fixture inherits from that stub.
 
 class EngineDriver {
@@ -76,11 +76,11 @@ private:
 };
 
 // ─── Fixture ──────────────────────────────────────────────────────────────────
-// Inherits from HistorianSpy and FactoryStub — so this IS the spy and the stub.
+// Inherits from HistorianSpy and FactorySpy — so this IS the spy and the stub.
 // Non-owning shared_ptrs (spyKeeper_, factoryKeeper_) keep the engine's
 // weak_ptrs alive for the duration of the test.
 
-class EngineComponentTest : public ::testing::Test, public HistorianSpy, public FactoryStub {
+class EngineComponentTest : public ::testing::Test, public HistorianSpy, public FactorySpy {
 protected:
     void SetUp() override {
         [[maybe_unused]] auto r = ServiceLocator::instance().provide<Logger>(
@@ -89,7 +89,7 @@ protected:
         engine_ = std::make_shared<patterns::engine::Engine>();
 
         spyKeeper_     = std::shared_ptr<HistorianSpy>(this, [](auto*) {});
-        factoryKeeper_ = std::shared_ptr<FactoryStub>(this, [](auto*) {});
+        factoryKeeper_ = std::shared_ptr<FactorySpy>(this, [](auto*) {});
 
         engine_->setHistorian(spyKeeper_);
         engine_->setFactory(factoryKeeper_);
@@ -97,7 +97,7 @@ protected:
 
     std::shared_ptr<patterns::engine::Engine> engine_;
     std::shared_ptr<HistorianSpy>             spyKeeper_;
-    std::shared_ptr<FactoryStub>              factoryKeeper_;
+    std::shared_ptr<FactorySpy>              factoryKeeper_;
 };
 
 // ─── EngineDriver constructor ─────────────────────────────────────────────────
@@ -119,6 +119,7 @@ EngineDriver::EngineDriver(patterns::engine::Engine& engine, ::testing::Test* ow
         { "sendAddVector",
           [this] {
               if (auto* spy = dynamic_cast<HistorianSpy*>(owner_)) {
+                  ASSERT_FALSE(spy->commands.empty());
                   ASSERT_EQ(spy->commands.back(), "addVector");
               }
           }
@@ -135,6 +136,7 @@ EngineDriver::EngineDriver(patterns::engine::Engine& engine, ::testing::Test* ow
         { "sendSortVector",
           [this] {
               if (auto* spy = dynamic_cast<HistorianSpy*>(owner_)) {
+                  ASSERT_FALSE(spy->commands.empty());
                   ASSERT_EQ(spy->commands.back(), "sortVector");
               }
           }
@@ -151,7 +153,8 @@ EngineDriver::EngineDriver(patterns::engine::Engine& engine, ::testing::Test* ow
         // send: Engine asked factory for Descending strategy
         { "sendSetStrategy",
           [this] {
-              if (auto* stub = dynamic_cast<FactoryStub*>(owner_)) {
+              if (auto* stub = dynamic_cast<FactorySpy*>(owner_)) {
+                  ASSERT_FALSE(stub->requestedIds.empty());
                   ASSERT_EQ(stub->requestedIds.back(), SortStrategyId::Descending);
               }
           }
@@ -169,6 +172,7 @@ EngineDriver::EngineDriver(patterns::engine::Engine& engine, ::testing::Test* ow
           [this] {
               if (auto* spy = dynamic_cast<HistorianSpy*>(owner_)) {
                   ASSERT_FALSE(spy->snapshots.empty());
+                  // no back() call — emptiness check is sufficient here
               }
           }
         },

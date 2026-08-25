@@ -1,1 +1,0 @@
-add_subdirectory(engine_component_test)

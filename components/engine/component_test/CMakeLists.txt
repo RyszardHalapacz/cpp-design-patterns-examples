@@ -2,7 +2,7 @@ add_executable(engine_component_tests EngineComponentTest.cpp)
 
 target_link_libraries(engine_component_tests
     PRIVATE
-        patterns_lib
+        engine_lib
         GTest::gtest_main
 )
 

@@ -20,3 +20,4 @@ target_compile_definitions(engine_lib INTERFACE
 
 # ─── Tests ────────────────────────────────────────────────────────────────────
 add_subdirectory(tests)
+add_subdirectory(component_test)

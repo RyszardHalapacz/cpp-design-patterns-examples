@@ -29,6 +29,17 @@ Every pattern has its own classes, unit tests, and lecture notes.
 
 ## What else this project teaches
 
+At a glance, the project also covers:
+
+- **C++23** — `std::expected`, monadic operations, concepts
+- **Ownership & lifetime** — `shared_ptr`/`weak_ptr` ownership graphs, Rule of Zero, `weak_ptr` as a disconnect mechanism
+- **Multi-component CMake** — separate libraries, `FetchContent`, `enable_testing()` placement
+- **GoF patterns working together** — all patterns integrated into one coherent system, not isolated snippets
+- **Unit + component testing** — Google Test unit tests and an `Engine` component test harness
+- **CI + documentation** — GitHub Actions workflow, Mermaid diagrams, bilingual lecture notes
+
+---
+
 ### C++ project structure
 - Multi-component layout: `components/core/`, `components/engine/`, and `components/dummy_gui/` as separate static/interface libraries
 - Split into `include/` (headers) and `src/` (implementations) within each component
@@ -48,7 +59,7 @@ Every pattern has its own classes, unit tests, and lecture notes.
 - `TEST_F` — fixture-based tests with shared `SetUp`
 - `TEST_P` — parameterized tests (one test body, multiple data sets)
 - Stdout capture via `testing::internal::CaptureStdout()`
-- 107 tests across 7 test files (3 component test suites + 4 app-level)
+- 93 tests across 8 test files — verify live with `ctest --test-dir build`
 
 ### C++23 features
 - **`std::expected<T, E>`** — `ServiceLocator` and `SortStrategyFactory` return `expected` instead of throwing; callers handle errors explicitly
@@ -57,14 +68,89 @@ Every pattern has its own classes, unit tests, and lecture notes.
 
 ### C++ templates & idioms
 - `ServiceLocator` using `std::type_index` as a runtime type key
-- `static_assert` for compile-time constraint checking
+- **`concept ServiceType`** — `std::derived_from<TService, IService>` constrains `ServiceLocator` template parameters at the declaration site, replacing `static_assert` with cleaner compiler errors
 - **Meyers Singleton** — `static` local variable inside `instance()`
 - **`std::function` callbacks** — `DummyGui` stores `std::function` slots instead of raw session pointers; `Configurator` wires lambdas that capture `weak_ptr<SessionManagement>`
 - **`std::weak_ptr` observer collection** — `SessionManagement` holds `vector<weak_ptr<ISessionObserver>>`; expired observers are pruned automatically and duplicates are rejected
-- **`weak_ptr` lifetime control** — `EngineSessionCoordinator` owns `shared_ptr<EngineHistorian>`; `Engine` holds a `weak_ptr`; calling `disableHistorian()` resets the `shared_ptr` so the `weak_ptr` expires and `lock()` returns `nullptr`; `enableHistorian()` creates a fresh instance and re-wires it
+- **`weak_ptr` as disconnect mechanism** — `Application` owns `shared_ptr<IHistorian>`; `EngineSessionCoordinator` and `Engine` each hold a `weak_ptr`; `disableHistorian()` clears Engine's `weak_ptr` so the historian stops recording without destroying it; `enableHistorian()` re-wires the existing instance back
 - **Ownership model** — `Application` owns all top-level objects as `shared_ptr` / `unique_ptr`; `SessionManagement` holds `weak_ptr<Engine>`; `SessionAuditObserver` lifetime is controlled by `Application`, not the session
 - **Rule of Zero** — `DummyGuiAdapter` has no destructor; `unique_ptr<DummyGui>` calls `deleteGUI()` automatically via a `std::default_delete<DummyGui>` specialization
 - **C-style factory API** (`makeGUI` / `deleteGUI`) — simulates legacy C library interfaces (SDL, curl pattern); wrapped behind `IGui` by the Adapter
+
+---
+
+## Component testing — Engine as SUT
+
+Beyond classic unit tests the project includes a component test for `Engine`
+([`components/engine/component_test/EngineComponentTest.cpp`](components/engine/component_test/EngineComponentTest.cpp)).
+
+Unit tests verify isolated classes and operations.
+The component test treats `Engine` as a complete **System Under Test (SUT)**: only behaviour
+observable at the component boundary is asserted — internals are not inspected directly.
+
+### Test architecture
+
+The harness builds the minimal environment needed to run `Engine`:
+
+```
+                EngineComponentTest
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+    HistorianSpy              FactoryStub
+          ▲                         ▲
+          │                         │
+          └──────── Engine ─────────┘
+```
+
+`Engine` remains unaware it is under test.
+Production dependencies are replaced by test doubles wired through the same public interfaces:
+
+```
+IHistorian ──── EngineHistorian   (production)
+           └─── HistorianSpy      (component test)
+```
+
+- **`HistorianSpy`** — observation point on the `IHistorian` boundary; records every command name
+  and snapshot that `Engine` publishes
+- **`FactorySpy`** — observation point on the `ISortStrategyFactory` boundary; records which
+  strategy IDs `Engine` requests and delegates to the real factory
+- **`EngineDriver`** — sends stimuli to the SUT and asserts observable reactions at the boundary
+
+### Flow-based testing
+
+Tests are expressed as receive/send signal pairs:
+
+```
+receiveAddVector   →  sendAddVector
+receiveSortVector  →  sendSortVector
+receiveSetStrategy →  sendSetStrategy
+receiveSnapshot    →  sendSnapshot
+```
+
+`receive*` delivers a stimulus to `Engine`.
+`send*` asserts the expected behaviour at the component boundary.
+This verifies not just individual return values but the order and flow of the entire
+component's communication.
+
+### Design rationale
+
+The fixture uses multiple inheritance to declare which communication channels are active:
+
+```cpp
+class EngineComponentTest
+    : public ::testing::Test,
+      public HistorianSpy,  // enables Engine ↔ Historian channel
+      public FactorySpy {}; // enables Engine ↔ Factory channel
+```
+
+`EngineDriver` uses `dynamic_cast` to detect which capabilities the fixture exposes.
+Inheriting from a spy enables the entire channel; removing a base class disables it —
+which is more readable than toggling individual signals when the number of signals grows.
+
+The current implementation is deliberately synchronous, separating the testing model from
+concurrency concerns. The architecture allows `Engine` to move to a dedicated thread in the
+future, with direct calls replaced by message queues and timeout-based expectations.
 
 ---
 
@@ -86,7 +172,8 @@ wzorce/
 │   │   ├── include/patterns/
 │   │   │   └── engine/            # BasicEngine<Writer>, Engine (alias)
 │   │   ├── engine.yml.in
-│   │   └── tests/                 # test_engine.cpp (lifecycle, session events)
+│   │   ├── tests/                 # test_engine.cpp (lifecycle, session events)
+│   │   └── component_test/        # EngineComponentTest.cpp (Engine as SUT)
 │   └── dummy_gui/                 # Static library — GUI component
 │       ├── include/patterns/
 │       │   └── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder

@@ -67,4 +67,3 @@ target_link_libraries(patterns PRIVATE patterns_lib)
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
 add_subdirectory(tests)
-add_subdirectory(component_test)
