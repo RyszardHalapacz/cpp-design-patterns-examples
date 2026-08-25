@@ -11,19 +11,19 @@ void Configurator::configureGui(patterns::gui::DummyGuiAdapter& gui,
     logApp("[Configurator] Granting GUI access to selected functions\n");
     std::weak_ptr<patterns::session::SessionManagement> weak = session;
 
-    gui.connectAddVector([weak](const std::vector<int>& vec) {
+    gui.registerAddVectorHandler([weak](const std::vector<int>& vec) {
         if (auto s = weak.lock()) s->addVectorFromGui(vec);
         else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
     });
-    gui.connectSortVector([weak](size_t index) {
+    gui.registerSortVectorHandler([weak](size_t index) {
         if (auto s = weak.lock()) s->sortVectorFromGui(index);
         else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
     });
-    gui.connectPrintData([weak]() {
+    gui.registerPrintDataHandler([weak]() {
         if (auto s = weak.lock()) s->printDataFromGui();
         else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
     });
-    gui.connectSetSortStrategy([weak](SortStrategyId id) {
+    gui.registerStrategyHandler([weak](SortStrategyId id) {
         if (auto s = weak.lock()) s->setSortStrategyFromGui(id);
         else logApp("[GUI] SessionManagement no longer exists — operation cancelled\n");
     });

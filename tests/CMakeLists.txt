@@ -1,7 +1,6 @@
 add_executable(patterns_tests
     test_services.cpp
     test_strategy.cpp
-    test_engine.cpp
     test_session.cpp
     test_gui_owning.cpp
     test_establish_signals.cpp

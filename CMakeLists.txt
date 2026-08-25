@@ -22,12 +22,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(yaml-cpp)
 
-# ─── Component version numbers ───────────────────────────────────────────────
-set(APP_VERSION    "1.1.0")
-set(ENGINE_VERSION "1.0.0")
-
-configure_file(src/engine/engine.yml.in ${CMAKE_BINARY_DIR}/src/engine/engine.yml @ONLY)
-
 # ─── GoogleTest via FetchContent ─────────────────────────────────────────────
 FetchContent_Declare(
     googletest
@@ -37,11 +31,17 @@ FetchContent_Declare(
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
 
+# enable_testing() must be called before any add_subdirectory that contains tests
+enable_testing()
+
 # ─── Components ──────────────────────────────────────────────────────────────
 add_subdirectory(components/core)
+add_subdirectory(components/engine)
 add_subdirectory(components/dummy_gui)
 
-# ─── Static library (session + engine) ───────────────────────────────────────
+# ─── Static library (session + app) ──────────────────────────────────────────
+set(APP_VERSION "1.1.0")
+
 add_library(patterns_lib STATIC
     src/session/SessionManagement.cpp
     src/session/SessionCoordinator.cpp
@@ -54,11 +54,10 @@ target_include_directories(patterns_lib PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-target_link_libraries(patterns_lib PUBLIC core_lib dummy_gui_lib)
+target_link_libraries(patterns_lib PUBLIC core_lib engine_lib dummy_gui_lib)
 
 target_compile_definitions(patterns_lib PUBLIC
     APP_VERSION_STR="${APP_VERSION}"
-    ENGINE_VERSION_STR="${ENGINE_VERSION}"
 )
 
 # ─── Main executable ─────────────────────────────────────────────────────────
@@ -67,5 +66,4 @@ add_executable(patterns src/main.cpp
 target_link_libraries(patterns PRIVATE patterns_lib)
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
-enable_testing()
 add_subdirectory(tests)

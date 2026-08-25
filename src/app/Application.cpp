@@ -28,7 +28,7 @@ void Application::configure() {
     appWriter.write(exeDir_ / "application.yml", "patterns", "PatternsApp", APP_VERSION_STR);
     appWriter.printManifest(exeDir_ / "application.yml");
 
-    engine_    = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
+    engine_    = std::make_shared<patterns::engine::Engine>(std::filesystem::path(ENGINE_MANIFEST_PATH));
     factory_   = std::make_shared<patterns::strategy::SortStrategyFactory>();
     historian_ = std::make_shared<patterns::historian::EngineHistorian>();
     session_   = std::make_shared<patterns::session::SessionManagement>();

@@ -34,63 +34,66 @@ public:
     friend BasicDummyGui<Writer>* makeGUI<Writer>(std::filesystem::path);
     friend void                   deleteGUI<Writer>(BasicDummyGui<Writer>*);
 
-    void connectAddVector      (AddVectorFunc       f) { addVectorFunc_       = std::move(f); }
-    void connectSortVector     (SortVectorFunc      f) { sortVectorFunc_      = std::move(f); }
-    void connectPrintData      (PrintDataFunc       f) { printDataFunc_       = std::move(f); }
-    void connectSetSortStrategy(SetSortStrategyFunc f) { setSortStrategyFunc_ = std::move(f); }
+    // ── Handler registration (wiring API — called by Adapter) ─────────────
+    void registerAddVectorHandler  (AddVectorFunc       f) { addVectorFunc_       = std::move(f); }
+    void registerSortVectorHandler (SortVectorFunc      f) { sortVectorFunc_      = std::move(f); }
+    void registerPrintDataHandler  (PrintDataFunc       f) { printDataFunc_       = std::move(f); }
+    void registerStrategyHandler   (SetSortStrategyFunc f) { setSortStrategyFunc_ = std::move(f); }
 
-    void clickAddVector(const std::vector<int>& vec) {
+    // ── Event API (called when user interacts with GUI) ───────────────────
+    void onAddVectorClicked(const std::vector<int>& vec) {
         if (!addVectorFunc_) { patterns::services::logApp("[GUI] No access to AddVector\n"); return; }
         patterns::services::logApp("[GUI] Clicked AddVector\n");
         addVectorFunc_(vec);
     }
 
-    void clickSortVector(size_t index) {
+    void onSortVectorClicked(size_t index) {
         if (!sortVectorFunc_) { patterns::services::logApp("[GUI] No access to SortVector\n"); return; }
         patterns::services::logApp("[GUI] Clicked SortVector\n");
         sortVectorFunc_(index);
     }
 
-    void clickPrintData() {
+    void onPrintDataClicked() {
         if (!printDataFunc_) { patterns::services::logApp("[GUI] No access to PrintData\n"); return; }
         patterns::services::logApp("[GUI] Clicked PrintData\n");
         printDataFunc_();
     }
 
-    void clickSetSortStrategy(patterns::strategy::SortStrategyId id) {
+    void onStrategySelected(patterns::strategy::SortStrategyId id) {
         if (!setSortStrategyFunc_) { patterns::services::logApp("[GUI] No access to SetSortStrategy\n"); return; }
         patterns::services::logApp("[GUI] Clicked SetSortStrategy\n");
         setSortStrategyFunc_(id);
     }
 
-    BasicDummyGui& queueAddVector(const std::vector<int>& vec) {
+    // ── Batch scheduling API ──────────────────────────────────────────────
+    BasicDummyGui& scheduleAddVector(const std::vector<int>& vec) {
         if (!addVectorFunc_) { patterns::services::logApp("[GUI] No access to AddVector\n"); return *this; }
         patterns::services::logApp("[GUI] Adding AddVector to command batch\n");
         batchBuilder_.addVector(addVectorFunc_, vec);
         return *this;
     }
 
-    BasicDummyGui& queueSortVector(size_t index) {
+    BasicDummyGui& scheduleSortVector(size_t index) {
         if (!sortVectorFunc_) { patterns::services::logApp("[GUI] No access to SortVector\n"); return *this; }
         patterns::services::logApp("[GUI] Adding SortVector to command batch\n");
         batchBuilder_.sortVector(sortVectorFunc_, index);
         return *this;
     }
 
-    BasicDummyGui& queuePrintData() {
+    BasicDummyGui& schedulePrint() {
         if (!printDataFunc_) { patterns::services::logApp("[GUI] No access to PrintData\n"); return *this; }
         patterns::services::logApp("[GUI] Adding PrintData to command batch\n");
         batchBuilder_.printData(printDataFunc_);
         return *this;
     }
 
-    [[nodiscard]] CommandBatch buildBatch() {
+    [[nodiscard]] CommandBatch collectBatch() {
         patterns::services::logApp("[GUI] Closing command batch, ready to send\n");
         return batchBuilder_.build();
     }
 
-    void flushBatch() {
-        CommandBatch batch = buildBatch();
+    void dispatchScheduled() {
+        CommandBatch batch = collectBatch();
         if (batch.empty()) return;
         patterns::services::logApp("[GUI] Executing command batch\n");
         for (auto& cmd : batch) cmd->execute();

@@ -20,7 +20,7 @@ Every pattern has its own classes, unit tests, and lecture notes.
 | **Factory** | `SortStrategyFactory` | `components/core/include/patterns/strategy/SortStrategyFactory.hpp` |
 | **Observer** | `ISessionObserver`, `Engine`, `SessionAuditObserver` | `components/core/include/patterns/observer/`, `include/patterns/session/` |
 | **Facade** | `SessionManagement` | `include/patterns/session/SessionManagement.hpp` |
-| **Template Method** | `SessionEstablisher`, `EngineSessionEstablisher` | `include/patterns/session/SessionEstablisher.hpp` |
+| **Template Method** | `SessionCoordinator`, `EngineSessionCoordinator` | `include/patterns/session/SessionCoordinator.hpp` |
 | **Builder** | `CommandBatchBuilder` | `components/dummy_gui/include/patterns/gui/CommandBatchBuilder.hpp` |
 | **Command** | `ICommand`, `AddVectorCommand`, `SortVectorCommand`, `PrintDataCommand` | `components/core/include/patterns/gui/ICommand.hpp` |
 | **Adapter** | `DummyGuiAdapter`, `IGui` | `components/dummy_gui/include/patterns/gui/DummyGuiAdapter.hpp` |
@@ -30,15 +30,17 @@ Every pattern has its own classes, unit tests, and lecture notes.
 ## What else this project teaches
 
 ### C++ project structure
-- Multi-component layout: `components/core/` and `components/dummy_gui/` as separate static libraries
+- Multi-component layout: `components/core/`, `components/engine/`, and `components/dummy_gui/` as separate static/interface libraries
 - Split into `include/` (headers) and `src/` (implementations) within each component
 - Nested namespaces (`namespace patterns::services`)
 - Forward declarations to break circular dependencies
 
 ### CMake
-- Multi-component build: `core_lib` and `dummy_gui_lib` as separate `add_library` targets
+- Multi-component build: `core_lib`, `engine_lib` (INTERFACE), and `dummy_gui_lib` as separate `add_library` targets
+- `enable_testing()` placed before all `add_subdirectory` calls so every component's tests are discovered by CTest
 - `FetchContent` to download Google Test and yaml-cpp without a system-wide installation
 - Version injection via `configure_file` (`.yml.in` → `.yml`)
+- Compile-time manifest path macros (`ENGINE_MANIFEST_PATH`, `DUMMY_GUI_MANIFEST_PATH`)
 - Tests in separate subdirectories with their own `CMakeLists.txt`
 
 ### Google Test
@@ -46,11 +48,11 @@ Every pattern has its own classes, unit tests, and lecture notes.
 - `TEST_F` — fixture-based tests with shared `SetUp`
 - `TEST_P` — parameterized tests (one test body, multiple data sets)
 - Stdout capture via `testing::internal::CaptureStdout()`
-- 77 tests across 6 test files
+- 107 tests across 7 test files (3 component test suites + 4 app-level)
 
 ### C++23 features
 - **`std::expected<T, E>`** — `ServiceLocator` and `SortStrategyFactory` return `expected` instead of throwing; callers handle errors explicitly
-- **Monadic operations** — `and_then`, `transform`, `or_else` chained in `SessionEstablisher::establish()` for a clean, linear error-propagation pipeline
+- **Monadic operations** — `and_then`, `transform`, `or_else` chained in `SessionCoordinator::establish()` for a clean, linear error-propagation pipeline
 - No exceptions in the service or factory layer — all error paths are type-safe and composable
 
 ### C++ templates & idioms
@@ -59,6 +61,7 @@ Every pattern has its own classes, unit tests, and lecture notes.
 - **Meyers Singleton** — `static` local variable inside `instance()`
 - **`std::function` callbacks** — `DummyGui` stores `std::function` slots instead of raw session pointers; `Configurator` wires lambdas that capture `weak_ptr<SessionManagement>`
 - **`std::weak_ptr` observer collection** — `SessionManagement` holds `vector<weak_ptr<ISessionObserver>>`; expired observers are pruned automatically and duplicates are rejected
+- **`weak_ptr` lifetime control** — `EngineSessionCoordinator` owns `shared_ptr<EngineHistorian>`; `Engine` holds a `weak_ptr`; calling `disableHistorian()` resets the `shared_ptr` so the `weak_ptr` expires and `lock()` returns `nullptr`; `enableHistorian()` creates a fresh instance and re-wires it
 - **Ownership model** — `Application` owns all top-level objects as `shared_ptr` / `unique_ptr`; `SessionManagement` holds `weak_ptr<Engine>`; `SessionAuditObserver` lifetime is controlled by `Application`, not the session
 - **Rule of Zero** — `DummyGuiAdapter` has no destructor; `unique_ptr<DummyGui>` calls `deleteGUI()` automatically via a `std::default_delete<DummyGui>` specialization
 - **C-style factory API** (`makeGUI` / `deleteGUI`) — simulates legacy C library interfaces (SDL, curl pattern); wrapped behind `IGui` by the Adapter
@@ -76,25 +79,29 @@ wzorce/
 │   │   │   ├── strategy/          # ISortStrategy, 3 implementations, SortStrategyFactory
 │   │   │   ├── observer/          # ISessionObserver, SessionEvent
 │   │   │   ├── gui/               # IGui, ICommand + concrete commands
+│   │   │   ├── historian/         # EngineHistorian, CommandHistory, EngineSnapshot
 │   │   │   └── manifest/          # ManifestWriter
 │   │   └── src/
+│   ├── engine/                    # Interface library — Engine component
+│   │   ├── include/patterns/
+│   │   │   └── engine/            # BasicEngine<Writer>, Engine (alias)
+│   │   ├── engine.yml.in
+│   │   └── tests/                 # test_engine.cpp (lifecycle, session events)
 │   └── dummy_gui/                 # Static library — GUI component
 │       ├── include/patterns/
-│       │   ├── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
-│       │   └── config/            # Configurator
+│       │   └── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
 │       ├── src/
-│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter, Configurator)
+│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter)
 ├── include/patterns/              # App-level headers
 │   ├── app/                       # Application (configure + run)
-│   ├── engine/                    # Engine (BasicEngine<Writer>)
-│   └── session/                   # SessionManagement, SessionEstablisher, SessionAuditObserver
+│   └── session/                   # SessionManagement, SessionCoordinator, SessionAuditObserver
 ├── src/                           # App-level implementations + main.cpp
 ├── tests/                         # App-level unit tests
 │   ├── test_services.cpp          # Logger, FileLogger, ServiceLocator (std::expected API)
 │   ├── test_strategy.cpp          # All sort strategies + factory
-│   ├── test_engine.cpp            # Engine lifecycle and session events
-│   ├── test_session.cpp           # SessionManagement, SessionEstablisher, SessionAuditObserver
-│   └── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> and IGui virtual dispatch
+│   ├── test_session.cpp           # SessionManagement, SessionCoordinator, SessionAuditObserver
+│   ├── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> and IGui virtual dispatch
+│   └── test_establish_signals.cpp # SessionCoordinator Template Method steps
 └── docs/
     ├── en/
     │   ├── patterns_theory/       # Lecture notes in English (Markdown)

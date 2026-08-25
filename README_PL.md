@@ -20,7 +20,7 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 | **Factory** | `SortStrategyFactory` | `components/core/include/patterns/strategy/SortStrategyFactory.hpp` |
 | **Observer** | `ISessionObserver`, `Engine`, `SessionAuditObserver` | `components/core/include/patterns/observer/`, `include/patterns/session/` |
 | **Facade** | `SessionManagement` | `include/patterns/session/SessionManagement.hpp` |
-| **Template Method** | `SessionEstablisher`, `EngineSessionEstablisher` | `include/patterns/session/SessionEstablisher.hpp` |
+| **Template Method** | `SessionCoordinator`, `EngineSessionCoordinator` | `include/patterns/session/SessionCoordinator.hpp` |
 | **Builder** | `CommandBatchBuilder` | `components/dummy_gui/include/patterns/gui/CommandBatchBuilder.hpp` |
 | **Command** | `ICommand`, `AddVectorCommand`, `SortVectorCommand`, `PrintDataCommand` | `components/core/include/patterns/gui/ICommand.hpp` |
 | **Adapter** | `DummyGuiAdapter`, `IGui` | `components/dummy_gui/include/patterns/gui/DummyGuiAdapter.hpp` |
@@ -30,15 +30,17 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 ## Czego uczy ten projekt (poza wzorcami)
 
 ### Organizacja projektu C++
-- Wielokomponentowa struktura: `components/core/` i `components/dummy_gui/` jako osobne biblioteki statyczne
+- Wielokomponentowa struktura: `components/core/`, `components/engine/` i `components/dummy_gui/` jako osobne biblioteki statyczne/interfejsowe
 - Podział na `include/` (nagłówki) i `src/` (implementacje) wewnątrz każdego komponentu
 - Zagnieżdżone przestrzenie nazw (`namespace patterns::services`)
 - Forward declarations do rozrywania cykli zależności między klasami
 
 ### CMake
-- Budowanie wielokomponentowe: `core_lib` i `dummy_gui_lib` jako osobne cele `add_library`
+- Budowanie wielokomponentowe: `core_lib`, `engine_lib` (INTERFACE) i `dummy_gui_lib` jako osobne cele `add_library`
+- `enable_testing()` wywołane przed wszystkimi `add_subdirectory` — dzięki temu CTest widzi testy z każdego komponentu
 - `FetchContent` do pobierania Google Test i yaml-cpp bez instalacji systemowej
 - Wstrzykiwanie wersji przez `configure_file` (`.yml.in` → `.yml`)
+- Makra ze ścieżkami manifestów w czasie kompilacji (`ENGINE_MANIFEST_PATH`, `DUMMY_GUI_MANIFEST_PATH`)
 - Testy w osobnych podkatalogach z własnym `CMakeLists.txt`
 
 ### Google Test
@@ -46,11 +48,11 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 - `TEST_F` — testy z fixture (współdzielony `SetUp`)
 - `TEST_P` — testy sparametryzowane (jeden kod testu, wiele zestawów danych)
 - Przechwytywanie `stdout` przez `testing::internal::CaptureStdout()`
-- 77 testów w 6 plikach testowych
+- 107 testów w 7 plikach testowych (3 zestawy testów komponentów + 4 na poziomie aplikacji)
 
 ### Cechy C++23
 - **`std::expected<T, E>`** — metody `ServiceLocator` i `SortStrategyFactory` zwracają `expected` zamiast rzucać wyjątkami; wywołujący obsługuje błędy jawnie
-- **Operacje monadyczne** — `and_then`, `transform`, `or_else` połączone łańcuchem w `SessionEstablisher::establish()` tworzą liniowy, czytelny potok obsługi błędów
+- **Operacje monadyczne** — `and_then`, `transform`, `or_else` połączone łańcuchem w `SessionCoordinator::establish()` tworzą liniowy, czytelny potok obsługi błędów
 - Brak wyjątków w warstwie serwisów i fabryk — wszystkie ścieżki błędów są typowo bezpieczne i kompozytowalne
 
 ### Szablony i idiomy C++
@@ -59,6 +61,7 @@ Każdy wzorzec ma własne klasy, testy jednostkowe i materiały teoretyczne.
 - **Meyers Singleton** — `static` lokalna zmienna w metodzie `instance()`
 - **Callbacki `std::function`** — `DummyGui` przechowuje sloty `std::function` zamiast surowych wskaźników do sesji; `Configurator` podpina lambdy przechwytujące `weak_ptr<SessionManagement>`
 - **Kolekcja obserwatorów `weak_ptr`** — `SessionManagement` trzyma `vector<weak_ptr<ISessionObserver>>`; wygasłe obserwatory są automatycznie usuwane, a duplikaty odrzucane
+- **Kontrola czasu życia przez `weak_ptr`** — `EngineSessionCoordinator` jest właścicielem `shared_ptr<EngineHistorian>`; `Engine` trzyma `weak_ptr`; wywołanie `disableHistorian()` resetuje `shared_ptr`, przez co `weak_ptr` wygasa i `lock()` zwraca `nullptr`; `enableHistorian()` tworzy nową instancję i ponownie ją podłącza
 - **Model własności** — `Application` jest właścicielem wszystkich obiektów najwyższego poziomu jako `shared_ptr` / `unique_ptr`; `SessionManagement` trzyma `weak_ptr<Engine>`; czas życia `SessionAuditObserver` jest kontrolowany przez `Application`, nie przez sesję
 - **Rule of Zero** — `DummyGuiAdapter` nie ma destruktora; `unique_ptr<DummyGui>` automatycznie wywołuje `deleteGUI()` dzięki specjalizacji `std::default_delete<DummyGui>`
 - **C-style API fabryki** (`makeGUI` / `deleteGUI`) — symulacja interfejsów bibliotek C (wzorzec SDL, curl); ukryta za `IGui` przez Adapter
@@ -76,25 +79,29 @@ wzorce/
 │   │   │   ├── strategy/          # ISortStrategy, 3 implementacje, SortStrategyFactory
 │   │   │   ├── observer/          # ISessionObserver, SessionEvent
 │   │   │   ├── gui/               # IGui, ICommand + konkretne komendy
+│   │   │   ├── historian/         # EngineHistorian, CommandHistory, EngineSnapshot
 │   │   │   └── manifest/          # ManifestWriter
 │   │   └── src/
+│   ├── engine/                    # Biblioteka interfejsowa — komponent Engine
+│   │   ├── include/patterns/
+│   │   │   └── engine/            # BasicEngine<Writer>, Engine (alias)
+│   │   ├── engine.yml.in
+│   │   └── tests/                 # test_engine.cpp (cykl życia, zdarzenia sesji)
 │   └── dummy_gui/                 # Biblioteka statyczna — komponent GUI
 │       ├── include/patterns/
-│       │   ├── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
-│       │   └── config/            # Configurator
+│       │   └── gui/               # DummyGui (C-style API), DummyGuiAdapter, CommandBatchBuilder
 │       ├── src/
-│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter, Configurator)
+│       └── tests/                 # test_gui.cpp (CommandBatchBuilder, DummyGuiAdapter)
 ├── include/patterns/              # Nagłówki na poziomie aplikacji
 │   ├── app/                       # Application (configure + run)
-│   ├── engine/                    # Engine (BasicEngine<Writer>)
-│   └── session/                   # SessionManagement, SessionEstablisher, SessionAuditObserver
+│   └── session/                   # SessionManagement, SessionCoordinator, SessionAuditObserver
 ├── src/                           # Implementacje aplikacji + main.cpp
 ├── tests/                         # Testy jednostkowe aplikacji
 │   ├── test_services.cpp          # Logger, FileLogger, ServiceLocator (API std::expected)
 │   ├── test_strategy.cpp          # Wszystkie strategie sortowania + fabryka
-│   ├── test_engine.cpp            # Cykl życia Engine i zdarzenia sesji
-│   ├── test_session.cpp           # SessionManagement, SessionEstablisher, SessionAuditObserver
-│   └── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> i dispatch wirtualny przez IGui
+│   ├── test_session.cpp           # SessionManagement, SessionCoordinator, SessionAuditObserver
+│   ├── test_gui_owning.cpp        # unique_ptr<DummyGuiAdapter> i dispatch wirtualny przez IGui
+│   └── test_establish_signals.cpp # Kroki Template Method w SessionCoordinator
 └── docs/
     ├── en/
     │   ├── patterns_theory/       # Wykłady po angielsku (Markdown)

@@ -12,8 +12,11 @@ namespace patterns::gui {
 // Adaptee          : DummyGui       (C-style API: makeGUI / deleteGUI)
 // Adapter          : DummyGuiAdapter (bridges the two)
 //
+// IGui speaks:  click*, queue*, flushBatch
+// DummyGui speaks: on*Clicked, schedule*, dispatchScheduled
+//
 // Application holds unique_ptr<IGui> and never sees DummyGui.
-// Configurator wires callbacks via connect*() before the adapter
+// Configurator wires callbacks via register*Handler() before the adapter
 // is handed to Application as IGui.
 // ==================================
 class DummyGuiAdapter : public IGui {
@@ -21,12 +24,12 @@ public:
     explicit DummyGuiAdapter(std::filesystem::path manifestPath = {});
 
     // ── Wiring API (called by Configurator) ───────────────────────────────
-    void connectAddVector      (DummyGui::AddVectorFunc       f);
-    void connectSortVector     (DummyGui::SortVectorFunc      f);
-    void connectPrintData      (DummyGui::PrintDataFunc       f);
-    void connectSetSortStrategy(DummyGui::SetSortStrategyFunc f);
+    void registerAddVectorHandler  (DummyGui::AddVectorFunc       f);
+    void registerSortVectorHandler (DummyGui::SortVectorFunc      f);
+    void registerPrintDataHandler  (DummyGui::PrintDataFunc       f);
+    void registerStrategyHandler   (DummyGui::SetSortStrategyFunc f);
 
-    // ── IGui interface ────────────────────────────────────────────────────
+    // ── IGui interface — translated to DummyGui's event/schedule API ──────
     void  clickAddVector      (const std::vector<int>& vec)           override;
     void  clickSortVector     (size_t index)                          override;
     void  clickPrintData      ()                                      override;
