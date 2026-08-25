@@ -10,6 +10,7 @@
 #include "patterns/observer/ISessionObserver.hpp"
 #include "patterns/observer/SessionEvent.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/strategy/SortStrategyFactory.hpp"
 #include "patterns/gui/Command.hpp"
 
 using namespace patterns::session;
@@ -20,7 +21,7 @@ using namespace patterns::services;
 class SessionTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
+        [[maybe_unused]] auto _ = ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
     }
 };
 
@@ -216,11 +217,12 @@ TEST_F(SessionTest, AttachDuplicateObserverIsIgnored) {
 // ─── EngineSessionEstablisher ────────────────────────────────────────────────
 
 TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
-    auto engine = std::make_shared<patterns::engine::Engine>();
+    auto engine  = std::make_shared<patterns::engine::Engine>();
+    auto factory = std::make_shared<patterns::strategy::SortStrategyFactory>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
-    EngineSessionEstablisher establisher(session, engine);
+    EngineSessionEstablisher establisher(session, engine, factory);
     auto result = establisher.establish();
     std::string out = testing::internal::GetCapturedStdout();
 
@@ -233,10 +235,11 @@ TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
 
 TEST_F(SessionTest, EngineSessionEstablisher_NullEngine_ReturnsError) {
     std::shared_ptr<patterns::engine::Engine> noEngine;
+    auto factory = std::make_shared<patterns::strategy::SortStrategyFactory>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
-    EngineSessionEstablisher establisher(session, noEngine);
+    EngineSessionEstablisher establisher(session, noEngine, factory);
     auto result = establisher.establish();
     std::string out = testing::internal::GetCapturedStdout();
 

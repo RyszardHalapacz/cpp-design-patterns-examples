@@ -237,7 +237,7 @@ private:
 class EstablishSignalsTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        patterns::services::ServiceLocator::instance()
+        [[maybe_unused]] auto _ = patterns::services::ServiceLocator::instance()
             .provide<patterns::services::Logger>(
                 std::make_shared<patterns::services::Logger>());
         engine_ = std::make_shared<patterns::engine::Engine>();

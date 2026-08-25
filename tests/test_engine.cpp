@@ -17,8 +17,16 @@ using namespace patterns::services;
 
 class EngineTest : public ::testing::Test {
 protected:
+    std::shared_ptr<SortStrategyFactory> factory = std::make_shared<SortStrategyFactory>();
+
     void SetUp() override {
-        ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
+        [[maybe_unused]] auto _ = ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
+    }
+
+    Engine makeEngine() {
+        Engine e;
+        e.setFactory(factory);
+        return e;
     }
 };
 
@@ -35,7 +43,7 @@ void PrintTo(const EngineLifecycleParam& p, std::ostream* os) { *os << p.name; }
 class EngineLifecycleTest : public ::testing::TestWithParam<EngineLifecycleParam> {
 protected:
     void SetUp() override {
-        ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
+        [[maybe_unused]] auto _ = ServiceLocator::instance().provide<Logger>(std::make_shared<Logger>());
     }
 };
 
@@ -59,7 +67,7 @@ INSTANTIATE_TEST_SUITE_P(
 // ─── addVector / sortVector ───────────────────────────────────────────────────
 
 TEST_F(EngineTest, AddVectorThenSort) {
-    Engine e;
+    Engine e = makeEngine();
     e.addVector({5, 3, 1, 4, 2});
 
     testing::internal::CaptureStdout();
@@ -133,7 +141,7 @@ TEST_F(EngineTest, SessionEventVectorAdded) {
 }
 
 TEST_F(EngineTest, SessionEventSortRequested) {
-    Engine e;
+    Engine e = makeEngine();
     e.addVector({3, 1, 2});
 
     SessionEvent ev;
