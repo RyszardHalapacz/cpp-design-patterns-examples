@@ -1,13 +1,15 @@
 #pragma once
 #include <cstddef>
 #include <string>
+#include <vector>
 #include "patterns/strategy/SortStrategyId.hpp"
 
 namespace patterns::historian {
 
 struct CommandHistory
 {
-    std::string commandName;
+    std::string      commandName;
+    std::vector<int> data{};      // payload — empty when not applicable
 };
 
 struct EngineSnapshot

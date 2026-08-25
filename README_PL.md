@@ -153,6 +153,49 @@ Obecna implementacja jest celowo synchroniczna, co oddziela model testowania od 
 z synchronizacją. Architektura pozwala w przyszłości przenieść `Engine` do osobnego wątku,
 zastępując bezpośrednie wywołania kolejkami komunikatów i asercjami z timeoutem.
 
+### Uruchomienie testu komponentowego
+
+```bash
+# Budowanie
+cmake --build build --parallel
+
+# Uruchomienie wszystkich testów komponentowych
+./build/components/engine/component_test/engine_component_tests
+
+# Uruchomienie jednego przypadku testowego
+./build/components/engine/component_test/engine_component_tests --gtest_filter="EngineComponentTest.RunExecutesAllSignals"
+```
+
+### Włączanie i wyłączanie kanałów
+
+Usunięcie klasy bazowej z fixture wyłącza cały kanał — wszystkie lambdy `send*` dla tego
+spy zwracają `false` i wiersze znikają z diagramu bez modyfikowania `EngineDriver`:
+
+```cpp
+class EngineComponentTest
+    : public ::testing::Test,
+      public HistorianSpy,   // usuń → wyłącza kanał Engine ↔ Historian
+      public FactorySpy {};  // usuń → wyłącza kanał Engine ↔ Factory
+```
+
+### Przykładowy przebieg (oba kanały aktywne)
+
+```
+[Driver] ---receiveAddVector------> [Engine]                                                # [Engine] Event received: session state changed
+                                                                                            # [Engine] -> recognized: vector added
+                                    [Engine] ---sendAddVector---------> [HistorianSpy]
+[Driver] ---receiveSortVector-----> [Engine]                                                # [Engine] Event received: session state changed
+                                                                                            # [Engine] -> recognized: sort requested
+                                                                                            # [Engine] Sorting with strategy: Ascending
+                                    [Engine] ---sendSortVector---------> [HistorianSpy]
+[Driver] ---receiveSetStrategy----> [Engine]                                                # [Engine] Event received: session state changed
+                                                                                            # [Engine] -> recognized: strategy change requested
+                                                                                            # [Engine] Sort strategy set: Descending
+                                    [Engine] ---sendSetStrategy-------> [FactorySpy]
+[Driver] ---receiveSnapshot-------> [Engine]
+                                    [Engine] ---sendSnapshot-----------> [HistorianSpy]
+```
+
 ---
 
 ## Struktura projektu
