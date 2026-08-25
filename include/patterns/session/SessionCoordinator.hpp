@@ -4,7 +4,7 @@
 #include <string>
 #include "patterns/engine/Engine.hpp"
 #include "patterns/strategy/ISortStrategyFactory.hpp"
-#include "patterns/historian/EngineHistorian.hpp"
+#include "patterns/historian/IHistorian.hpp"
 
 namespace patterns::session {
 
@@ -35,7 +35,7 @@ public:
     EngineSessionCoordinator(SessionManagement& session,
                              std::shared_ptr<patterns::engine::Engine> engine,
                              std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory,
-                             std::shared_ptr<patterns::historian::EngineHistorian> historian);
+                             std::shared_ptr<patterns::historian::IHistorian> historian);
 
     // Clears Engine's weak_ptr — historian stops recording, but Application still owns it
     void disableHistorian();
@@ -53,7 +53,7 @@ private:
     SessionManagement&                                         session_;
     std::shared_ptr<patterns::engine::Engine>                  engine_;
     std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
-    std::weak_ptr<patterns::historian::EngineHistorian>        historian_;
+    std::weak_ptr<patterns::historian::IHistorian>        historian_;
 };
 
 } // namespace patterns::session

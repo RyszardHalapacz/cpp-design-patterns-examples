@@ -11,6 +11,7 @@
 #include "patterns/observer/SessionEvent.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/strategy/SortStrategyFactory.hpp"
+#include "patterns/historian/EngineHistorian.hpp"
 #include "patterns/gui/Command.hpp"
 
 using namespace patterns::session;

@@ -7,6 +7,7 @@
 #include "patterns/gui/IGui.hpp"
 #include "patterns/config/Configurator.hpp"
 #include "patterns/strategy/ISortStrategyFactory.hpp"
+#include "patterns/historian/IHistorian.hpp"
 #include "patterns/historian/EngineHistorian.hpp"
 
 namespace patterns::app {
@@ -27,7 +28,7 @@ private:
     std::filesystem::path                                 exeDir_;
     std::shared_ptr<patterns::engine::Engine>                  engine_;
     std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
-    std::shared_ptr<patterns::historian::EngineHistorian>      historian_;
+    std::shared_ptr<patterns::historian::IHistorian>           historian_;
     std::shared_ptr<patterns::session::SessionManagement>      session_;
     std::shared_ptr<patterns::session::SessionAuditObserver>   audit_;
     std::unique_ptr<patterns::gui::IGui>                       gui_;

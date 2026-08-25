@@ -1,25 +1,12 @@
 #pragma once
-#include <cstddef>
-#include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/historian/IHistorian.hpp"
 
 namespace patterns::historian {
 
-struct CommandHistory
-{
-};
-
-struct EngineSnapshot
-{
-    bool                             running     = false;
-    patterns::strategy::SortStrategyId strategy  = patterns::strategy::SortStrategyId::Ascending;
-    std::size_t                      vectorCount = 0;
-};
-
-class EngineHistorian
-{
+class EngineHistorian : public IHistorian {
 public:
-    void recordCommand(const CommandHistory&) {}
-    void publishSnapshot(const EngineSnapshot&) {}
+    void recordCommand(const CommandHistory& cmd)    override {}
+    void publishSnapshot(const EngineSnapshot& snap) override {}
 };
 
 } // namespace patterns::historian

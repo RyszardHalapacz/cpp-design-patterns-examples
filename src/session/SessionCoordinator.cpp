@@ -23,7 +23,7 @@ std::expected<void, std::string> SessionCoordinator::establish() {
 EngineSessionCoordinator::EngineSessionCoordinator(SessionManagement& session,
                                                    std::shared_ptr<patterns::engine::Engine> engine,
                                                    std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory,
-                                                   std::shared_ptr<patterns::historian::EngineHistorian> historian)
+                                                   std::shared_ptr<patterns::historian::IHistorian> historian)
     : session_(session), engine_(std::move(engine)), factory_(std::move(factory)), historian_(historian) {}
 
 void EngineSessionCoordinator::disableHistorian() {
