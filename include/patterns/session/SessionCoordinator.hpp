@@ -37,10 +37,10 @@ public:
                              std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory,
                              std::shared_ptr<patterns::historian::EngineHistorian> historian);
 
-    // Resets the shared_ptr — Engine's weak_ptr expires, historian stops recording
+    // Clears Engine's weak_ptr — historian stops recording, but Application still owns it
     void disableHistorian();
 
-    // Creates a new EngineHistorian and wires it to Engine — weak_ptr becomes valid again
+    // Re-wires existing historian to Engine (Application must still own the shared_ptr)
     void enableHistorian();
 
 protected:
@@ -53,7 +53,7 @@ private:
     SessionManagement&                                         session_;
     std::shared_ptr<patterns::engine::Engine>                  engine_;
     std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
-    std::shared_ptr<patterns::historian::EngineHistorian>      historian_;
+    std::weak_ptr<patterns::historian::EngineHistorian>        historian_;
 };
 
 } // namespace patterns::session

@@ -24,16 +24,16 @@ EngineSessionCoordinator::EngineSessionCoordinator(SessionManagement& session,
                                                    std::shared_ptr<patterns::engine::Engine> engine,
                                                    std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory,
                                                    std::shared_ptr<patterns::historian::EngineHistorian> historian)
-    : session_(session), engine_(std::move(engine)), factory_(std::move(factory)), historian_(std::move(historian)) {}
+    : session_(session), engine_(std::move(engine)), factory_(std::move(factory)), historian_(historian) {}
 
 void EngineSessionCoordinator::disableHistorian() {
-    historian_.reset();  // shared_ptr drops to 0 — Engine's weak_ptr expires
+    engine_->clearHistorian();  // Engine drops its weak_ptr; historian still alive in Application
     logApp("[EngineSessionCoordinator] Historian disabled\n");
 }
 
 void EngineSessionCoordinator::enableHistorian() {
-    historian_ = std::make_shared<patterns::historian::EngineHistorian>();
-    engine_->setHistorian(historian_);  // Engine gets a new valid weak_ptr
+    if (auto historian = historian_.lock())
+        engine_->setHistorian(historian);  // re-wire existing historian; no new allocation
     logApp("[EngineSessionCoordinator] Historian enabled\n");
 }
 
@@ -52,7 +52,8 @@ std::expected<void, std::string> EngineSessionCoordinator::connect() {
 std::expected<void, std::string> EngineSessionCoordinator::configure() {
     logApp("[EngineSessionCoordinator] Wiring factory and historian to engine\n");
     engine_->setFactory(factory_);
-    engine_->setHistorian(historian_);
+    if (auto historian = historian_.lock())
+        engine_->setHistorian(historian);
     return {};
 }
 
