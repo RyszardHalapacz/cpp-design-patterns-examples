@@ -55,18 +55,18 @@ public:
     void start() {
         running_ = true;
         patterns::services::logApp("[Engine] Start\n");
-        if (auto h = historian_.lock()) h->recordCommand(CommandHistory{});
+        if (auto h = historian_.lock()) h->recordCommand(patterns::historian::CommandHistory{});
     }
 
     void stop() {
         running_ = false;
         patterns::services::logApp("[Engine] Stop\n");
-        if (auto h = historian_.lock()) h->recordCommand(CommandHistory{});
+        if (auto h = historian_.lock()) h->recordCommand(patterns::historian::CommandHistory{});
     }
 
     void addVector(const std::vector<int>& vec) {
         data_.push_back(vec);
-        if (auto h = historian_.lock()) h->recordCommand(CommandHistory{});
+        if (auto h = historian_.lock()) h->recordCommand(patterns::historian::CommandHistory{});
     }
 
     void setSortStrategy(std::unique_ptr<patterns::strategy::ISortStrategy> strategy) {
@@ -78,7 +78,7 @@ public:
         std::ostringstream oss;
         oss << "[Engine] Sort strategy set: " << sortStrategy_->name() << "\n";
         patterns::services::logApp(oss.str());
-        if (auto h = historian_.lock()) h->recordCommand(CommandHistory{});
+        if (auto h = historian_.lock()) h->recordCommand(patterns::historian::CommandHistory{});
     }
 
     void sortVector(size_t index) {
@@ -94,7 +94,7 @@ public:
         oss << "[Engine] Sorting with strategy: " << sortStrategy_->name() << "\n";
         patterns::services::logApp(oss.str());
         (*sortStrategy_)(data_[index]);
-        if (auto h = historian_.lock()) h->recordCommand(CommandHistory{});
+        if (auto h = historian_.lock()) h->recordCommand(patterns::historian::CommandHistory{});
     }
 
     void printData() const {
