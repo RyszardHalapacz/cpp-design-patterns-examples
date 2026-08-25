@@ -8,6 +8,7 @@
 #include "patterns/strategy/ISortStrategyFactory.hpp"
 #include "patterns/services/ServiceLocator.hpp"
 #include "patterns/manifest/ManifestWriter.hpp"
+#include "patterns/historian/EngineHistorian.hpp"
 
 
 namespace patterns::engine {
@@ -20,6 +21,11 @@ public:
             manifestWriter_.write(manifestPath, "Engine", "Engine", ENGINE_VERSION_STR);
             manifestWriter_.printManifest(manifestPath);
         }
+    }
+
+    void setHistorian(std::shared_ptr<patterns::historian::EngineHistorian> historian) {
+        historian_ = historian;
+        patterns::services::logApp("[Engine] Historian connected\n");
     }
 
     void setFactory(std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory) {
@@ -121,8 +127,9 @@ private:
     bool                                               running_ = false;
     std::vector<std::vector<int>>                      data_;
     std::unique_ptr<patterns::strategy::ISortStrategy> sortStrategy_;
-    std::weak_ptr<patterns::strategy::ISortStrategyFactory> factory_;
-    Writer                                             manifestWriter_;
+    std::weak_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
+    std::weak_ptr<patterns::historian::EngineHistorian>      historian_;
+    Writer                                                   manifestWriter_;
 };
 
 using Engine = BasicEngine<>;

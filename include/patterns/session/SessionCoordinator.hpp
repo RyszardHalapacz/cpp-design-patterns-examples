@@ -4,20 +4,21 @@
 #include <string>
 #include "patterns/engine/Engine.hpp"
 #include "patterns/strategy/ISortStrategyFactory.hpp"
+#include "patterns/historian/EngineHistorian.hpp"
 
 namespace patterns::session {
 
 class SessionManagement;
 
 // ==================================
-// SESSION ESTABLISHER — Template Method
-// Fixed algorithm skeleton for session establishment;
+// SESSION COORDINATOR — Template Method
+// Fixed algorithm skeleton for session coordination;
 // subclasses provide concrete steps.
 // C++23: establish() returns std::expected — monadic and_then/or_else chain.
 // ==================================
-class SessionEstablisher {
+class SessionCoordinator {
 public:
-    virtual ~SessionEstablisher() = default;
+    virtual ~SessionCoordinator() = default;
 
     [[nodiscard]] std::expected<void, std::string> establish();  // non-overridable skeleton
 
@@ -29,11 +30,18 @@ protected:
 };
 
 // Concrete implementation: connects SessionManagement to Engine
-class EngineSessionEstablisher : public SessionEstablisher {
+class EngineSessionCoordinator : public SessionCoordinator {
 public:
-    EngineSessionEstablisher(SessionManagement& session,
+    EngineSessionCoordinator(SessionManagement& session,
                              std::shared_ptr<patterns::engine::Engine> engine,
-                             std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory);
+                             std::shared_ptr<patterns::strategy::ISortStrategyFactory> factory,
+                             std::shared_ptr<patterns::historian::EngineHistorian> historian);
+
+    // Resets the shared_ptr — Engine's weak_ptr expires, historian stops recording
+    void disableHistorian();
+
+    // Creates a new EngineHistorian and wires it to Engine — weak_ptr becomes valid again
+    void enableHistorian();
 
 protected:
     [[nodiscard]] std::expected<void, std::string> checkPreconditions() override;
@@ -45,6 +53,7 @@ private:
     SessionManagement&                                         session_;
     std::shared_ptr<patterns::engine::Engine>                  engine_;
     std::shared_ptr<patterns::strategy::ISortStrategyFactory>  factory_;
+    std::shared_ptr<patterns::historian::EngineHistorian>      historian_;
 };
 
 } // namespace patterns::session

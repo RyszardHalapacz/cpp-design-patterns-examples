@@ -1,6 +1,6 @@
 #include "patterns/app/Application.hpp"
 #include "patterns/services/ServiceLocator.hpp"
-#include "patterns/session/SessionEstablisher.hpp"
+#include "patterns/session/SessionCoordinator.hpp"
 #include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "patterns/strategy/SortStrategyFactory.hpp"
@@ -28,9 +28,10 @@ void Application::configure() {
     appWriter.write(exeDir_ / "application.yml", "patterns", "PatternsApp", APP_VERSION_STR);
     appWriter.printManifest(exeDir_ / "application.yml");
 
-    engine_  = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
-    factory_ = std::make_shared<patterns::strategy::SortStrategyFactory>();
-    session_ = std::make_shared<patterns::session::SessionManagement>();
+    engine_    = std::make_shared<patterns::engine::Engine>(exeDir_ / "src" / "engine" / "engine.yml");
+    factory_   = std::make_shared<patterns::strategy::SortStrategyFactory>();
+    historian_ = std::make_shared<patterns::historian::EngineHistorian>();
+    session_   = std::make_shared<patterns::session::SessionManagement>();
 
     // ADAPTER — wraps the C-style DummyGui API behind the IGui interface
     auto adapter = std::make_unique<patterns::gui::DummyGuiAdapter>(
@@ -38,8 +39,8 @@ void Application::configure() {
 
     adapter->clickAddVector({3, 1, 2});  // no access — Configurator not yet connected
 
-    // TEMPLATE METHOD — session establishment via EngineSessionEstablisher
-    patterns::session::EngineSessionEstablisher establisher(*session_, engine_, factory_);
+    // TEMPLATE METHOD — session establishment via EngineSessionCoordinator
+    patterns::session::EngineSessionCoordinator establisher(*session_, engine_, factory_, historian_);
     if (auto r = establisher.establish(); !r)
         logApp("[App] Session establishment failed: " + r.error() + "\n");
 

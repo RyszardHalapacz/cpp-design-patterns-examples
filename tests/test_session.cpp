@@ -2,7 +2,7 @@
 #include <memory>
 
 #include "patterns/session/SessionManagement.hpp"
-#include "patterns/session/SessionEstablisher.hpp"
+#include "patterns/session/SessionCoordinator.hpp"
 #include "patterns/session/SessionAuditObserver.hpp"
 #include "patterns/engine/Engine.hpp"
 #include "patterns/services/ServiceLocator.hpp"
@@ -214,40 +214,40 @@ TEST_F(SessionTest, AttachDuplicateObserverIsIgnored) {
     EXPECT_EQ(spy->callCount, 1);  // called once, not twice
 }
 
-// ─── EngineSessionEstablisher ────────────────────────────────────────────────
+// ─── EngineSessionCoordinator ────────────────────────────────────────────────
 
-TEST_F(SessionTest, EngineSessionEstablisherConnectsAndOpens) {
+TEST_F(SessionTest, EngineSessionCoordinatorConnectsAndOpens) {
     auto engine  = std::make_shared<patterns::engine::Engine>();
     auto factory = std::make_shared<patterns::strategy::SortStrategyFactory>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
-    EngineSessionEstablisher establisher(session, engine, factory);
-    auto result = establisher.establish();
+    EngineSessionCoordinator coordinator(session, engine, factory, std::make_shared<patterns::historian::EngineHistorian>());
+    auto result = coordinator.establish();
     std::string out = testing::internal::GetCapturedStdout();
 
     EXPECT_TRUE(result.has_value());
-    EXPECT_NE(out.find("[SessionEstablisher] Starting"), std::string::npos);
+    EXPECT_NE(out.find("[SessionCoordinator] Starting"), std::string::npos);
     EXPECT_NE(out.find("[Session] Engine connected"), std::string::npos);
     EXPECT_NE(out.find("[Engine] Start"), std::string::npos);
-    EXPECT_NE(out.find("[SessionEstablisher] Session established"), std::string::npos);
+    EXPECT_NE(out.find("[SessionCoordinator] Session established"), std::string::npos);
 }
 
-TEST_F(SessionTest, EngineSessionEstablisher_NullEngine_ReturnsError) {
+TEST_F(SessionTest, EngineSessionCoordinator_NullEngine_ReturnsError) {
     std::shared_ptr<patterns::engine::Engine> noEngine;
     auto factory = std::make_shared<patterns::strategy::SortStrategyFactory>();
     SessionManagement session;
 
     testing::internal::CaptureStdout();
-    EngineSessionEstablisher establisher(session, noEngine, factory);
-    auto result = establisher.establish();
+    EngineSessionCoordinator coordinator(session, noEngine, factory, std::make_shared<patterns::historian::EngineHistorian>());
+    auto result = coordinator.establish();
     std::string out = testing::internal::GetCapturedStdout();
 
     EXPECT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), "Engine not available");
-    EXPECT_NE(out.find("[SessionEstablisher] Engine not available — aborting"), std::string::npos);
+    EXPECT_NE(out.find("[SessionCoordinator] Engine not available — aborting"), std::string::npos);
     EXPECT_EQ(out.find("[Session] Engine connected"), std::string::npos);
-    EXPECT_EQ(out.find("[SessionEstablisher] Session established"), std::string::npos);
+    EXPECT_EQ(out.find("[SessionCoordinator] Session established"), std::string::npos);
 }
 
 // ─── SessionAuditObserver ────────────────────────────────────────────────────

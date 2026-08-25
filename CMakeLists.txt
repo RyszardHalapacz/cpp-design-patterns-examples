@@ -44,7 +44,7 @@ add_subdirectory(components/dummy_gui)
 # ─── Static library (session + engine) ───────────────────────────────────────
 add_library(patterns_lib STATIC
     src/session/SessionManagement.cpp
-    src/session/SessionEstablisher.cpp
+    src/session/SessionCoordinator.cpp
     src/session/SessionAuditObserver.cpp
     src/config/Configurator.cpp
     src/app/Application.cpp
@@ -62,7 +62,8 @@ target_compile_definitions(patterns_lib PUBLIC
 )
 
 # ─── Main executable ─────────────────────────────────────────────────────────
-add_executable(patterns src/main.cpp)
+add_executable(patterns src/main.cpp
+        src/app/Application.cpp)
 target_link_libraries(patterns PRIVATE patterns_lib)
 
 # ─── Tests ───────────────────────────────────────────────────────────────────
