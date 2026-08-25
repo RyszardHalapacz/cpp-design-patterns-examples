@@ -12,59 +12,138 @@ Preview Mermaid Support extension).
 
 ---
 
-## 1. GUI configuration at program startup
+## 1. `Application::configure()` — object creation and wiring
 
-`Configurator` wires `DummyGui` to `SessionManagement` (five method pointers)
-and sets the policy for allowed sort strategies.
+`main()` creates `Application` and calls `configure()`. Inside, Application
+registers services in `ServiceLocator`, creates the full object graph, runs
+`EngineSessionCoordinator::establish()` (Template Method), wires GUI callbacks
+via `Configurator`, and attaches the `SessionAuditObserver`.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Main as main()
+    participant App as Application
+    participant SL as ServiceLocator
+    participant Coord as EngineSessionCoordinator
     participant Cfg as Configurator
-    participant Gui as DummyGui
     participant Session as SessionManagement
 
-    Main->>Cfg: configureGui(gui, session)
-    activate Cfg
-    Cfg->>Gui: connectAddVector(session, ...)
-    Cfg->>Gui: connectSortVector(session, ...)
-    Cfg->>Gui: connectPrintData(session, ...)
-    Cfg->>Gui: connectExecuteBatch(session, ...)
+    Main->>+App: configure()
+    App->>SL: provide<Logger>()
+    App->>SL: provide<FileLogger>("engine_log.txt")
+    App->>SL: provideRuntime<DoSomething>()
+    Note right of App: creates engine_, factory_,<br/>historian_, session_, adapter
+    App->>+Coord: EngineSessionCoordinator(session, engine, factory, historian)
+    App->>Coord: establish()
+    Note right of Coord: Template Method:<br/>checkPreconditions → connect<br/>→ configure → finalizeSetup
+    Coord-->>-App: expected ok
+    App->>+Cfg: configurator_.configureGui(adapter, session_)
+    Cfg->>Cfg: register 4 lambda handlers on adapter
     deactivate Cfg
-    Main->>Cfg: configureAllowedStrategies(session, ...)
-    activate Cfg
+    App->>+Cfg: configurator_.configureAllowedStrategies(session_, ...)
+    Cfg->>Session: setAllowedStrategies(allowed)
+    deactivate Cfg
+    App->>App: gui_ = move(adapter)
+    App->>Session: session_->attach(audit_)
+    deactivate App
+    Main->>App: run()
+```
+
+---
+
+## 2. `establish()` detail — Template Method (session + engine wiring)
+
+`EngineSessionCoordinator::establish()` calls four protected steps in a fixed
+order. `connect()` registers Engine as a session observer. `configure()` pushes
+the factory and historian into Engine (Engine stores both as `weak_ptr`).
+`finalizeSetup()` opens the session and starts the engine.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Application
+    participant Coord as EngineSessionCoordinator
+    participant Session as SessionManagement
+    participant Eng as Engine
+
+    App->>+Coord: establish()
+    Coord->>Coord: checkPreconditions()
+    Coord->>+Session: connect()
+    Session->>Session: connectToEngine(engine_)
+    Session->>Session: attach(engine_)
+    Note right of Session: Engine stored as weak_ptr<br/>in observers_ — receives nothing yet
+    deactivate Session
+    Coord->>Coord: configure()
+    Coord->>Eng: engine_->setFactory(factory_)
+    Coord->>Eng: engine_->setHistorian(historian_)
+    Note right of Eng: Engine stores weak_ptr to both;<br/>Application's shared_ptr keeps them alive
+    Coord->>+Session: finalizeSetup()
+    Session->>Session: openSession()
+    Session->>Eng: onSessionEvent(SessionOpened) → start()
+    deactivate Session
+    Coord-->>-App: expected ok
+```
+
+---
+
+## 3. GUI wiring — Configurator registers lambda handlers
+
+`Configurator::configureGui()` captures a `weak_ptr<SessionManagement>` in
+each lambda and registers it on `DummyGuiAdapter`. The `weak_ptr` ensures the
+lambda is safe to call even if the session is destroyed before the GUI.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Application
+    participant Cfg as Configurator
+    participant Adapter as DummyGuiAdapter
+    participant Session as SessionManagement
+
+    App->>+Cfg: configurator_.configureGui(adapter, session_)
+    Cfg->>Adapter: registerAddVectorHandler(lambda)
+    Cfg->>Adapter: registerSortVectorHandler(lambda)
+    Cfg->>Adapter: registerPrintDataHandler(lambda)
+    Cfg->>Adapter: registerStrategyHandler(lambda)
+    Note right of Adapter: each lambda captures<br/>weak_ptr<SessionManagement>
+    deactivate Cfg
+    App->>+Cfg: configurator_.configureAllowedStrategies(session_, {Ascending, Descending})
     Cfg->>Session: setAllowedStrategies(allowed)
     deactivate Cfg
 ```
 
 ---
 
-## 2. GUI click: add vector
+## 4. `Application::run()` — GUI click: add vector
 
-`main()` calls `DummyGui.clickAddVector()`, which forwards the call
-**via a method pointer** (set earlier by Configurator) — only then does it
-reach `SessionManagement`, which broadcasts the event to `Engine`.
+`Application::run()` calls `gui_->clickAddVector()` through the `IGui`
+interface. `DummyGuiAdapter` (Adapter) translates it into `DummyGui`'s
+vocabulary (`onAddVectorClicked`), which fires the registered lambda.
+The lambda forwards the call to `SessionManagement`, which notifies `Engine`
+via the Observer pattern.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Main as main()
+    participant App as Application
+    participant Adapter as DummyGuiAdapter
     participant Gui as DummyGui
     participant Session as SessionManagement
     participant Eng as Engine
 
-    Main->>Gui: clickAddVector(vec)
-    activate Gui
-    Gui->>Gui: (session_->*addVectorFunc_)(vec)
-    Note right of Gui: call via method pointer,<br/>set earlier by Configurator
-    Gui->>Session: addVectorFromGui(vec)
+    App->>+Adapter: gui_->clickAddVector(vec)
+    Note left of App: called via IGui interface;<br/>App does not see DummyGuiAdapter
+    Adapter->>+Gui: onAddVectorClicked(vec)
+    Gui->>Gui: addVectorFunc_(vec)
+    Note right of Gui: fires std::function lambda<br/>registered by Configurator
+    Gui->>Session: session->addVectorFromGui(vec)
     deactivate Gui
+    deactivate Adapter
     activate Session
     Session->>Session: checkSession()
     Session->>Session: notify(VectorAdded)
-    Session->>Eng: onSessionEvent(VectorAdded)
-    activate Eng
+    Session->>+Eng: onSessionEvent(VectorAdded)
     Eng->>Eng: addVector(vec)
     deactivate Eng
     deactivate Session
@@ -72,106 +151,41 @@ sequenceDiagram
 
 ---
 
-## 3. Session creation (`EngineSessionEstablisher.establish()`)
+## 5. `Application::run()` — strategy change
 
-Template Method: fixed skeleton (`checkPreconditions()` → `connect()` →
-`configure()` → `finalizeSetup()`). Note the `attach(&engine)` — it is a
-self-call on `SessionManagement`, not a message to `Engine` (which at this
-point receives nothing, it is only stored for later).
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Main as main()
-    participant Est as EngineSessionEstablisher
-    participant Session as SessionManagement
-    participant Eng as Engine
-
-    Main->>Est: establish()
-    activate Est
-    Est->>Est: checkPreconditions()
-    Est->>Session: connect()
-    activate Session
-    Session->>Session: connectToEngine(engine)
-    Session->>Session: attach(&engine)
-    Note right of Session: stores pointer in observers_,<br/>Engine receives nothing yet
-    deactivate Session
-    Est->>Est: configure()
-    Est->>Session: finalizeSetup()
-    activate Session
-    Session->>Session: openSession()
-    Session->>Eng: start()
-    deactivate Session
-    deactivate Est
-```
-
----
-
-## 4. Closing the session
-
-`SessionManagement` broadcasts `SessionClosing` to both observers.
-`AuditObserver` reacts by destroying itself (`delete this`) — hence the
-**X** on its lifeline, exactly as in the classic UML destruction notation.
+`Application` requests a strategy change through `IGui`. The call flows through
+the Adapter layer, fires a lambda into `SessionManagement`, which validates the
+request and broadcasts it via Observer. `Engine` builds the new strategy using
+`ISortStrategyFactory` (held as a `weak_ptr`). `SessionAuditObserver` receives
+the same event in parallel.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Main as main()
-    participant Session as SessionManagement
-    participant Eng as Engine
-    participant Audit as AuditObserver
-
-    Main->>Session: closeSession()
-    activate Session
-    Session->>Eng: onSessionEvent(SessionClosing)
-    activate Eng
-    Eng->>Eng: stop()
-    deactivate Eng
-    Session->>Audit: onSessionEvent(SessionClosing)
-    activate Audit
-    Audit->>Audit: delete this
-    destroy Audit
-    deactivate Session
-```
-
----
-
-## 5. Changing the sort strategy
-
-Flow through `DummyGui` → `SessionManagement` → `notify()` (Observer) →
-`Engine`, which **itself** calls `SortStrategyFactory` to build the new
-strategy. `AuditObserver` receives the same event in parallel — so the
-audit genuinely sees strategy-change requests.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Main as main()
+    participant App as Application
+    participant Adapter as DummyGuiAdapter
     participant Gui as DummyGui
     participant Session as SessionManagement
     participant Eng as Engine
     participant Fac as SortStrategyFactory
-    participant Audit as AuditObserver
+    participant Audit as SessionAuditObserver
 
-    Main->>Gui: clickSetSortStrategy(Descending)
-    activate Gui
-    Gui->>Gui: (session_->*setSortStrategyFunc_)(id)
-    Note right of Gui: call via method pointer,<br/>set earlier by Configurator
-    Gui->>Session: setSortStrategyFromGui(id)
+    App->>+Adapter: gui_->clickSetSortStrategy(Descending)
+    Adapter->>+Gui: onStrategySelected(Descending)
+    Gui->>Gui: setSortStrategyFunc_(id)
+    Note right of Gui: fires std::function lambda<br/>registered by Configurator
+    Gui->>Session: session->setSortStrategyFromGui(id)
     deactivate Gui
+    deactivate Adapter
     activate Session
     Session->>Session: isStrategyAllowed(id)
     Session->>Session: notify(StrategyChangeRequested)
-    Session->>Eng: onSessionEvent(StrategyChangeRequested)
-    activate Eng
-    Eng->>Fac: create(id)
-    activate Fac
-    Fac-->>Eng: unique_ptr<DescendingSortStrategy>
-    deactivate Fac
+    Session->>+Eng: onSessionEvent(StrategyChangeRequested)
+    Eng->>+Fac: factory_.lock()->create(id)
+    Fac-->>-Eng: unique_ptr<DescendingSortStrategy>
     Eng->>Eng: setSortStrategy(strategy)
     deactivate Eng
-    Session->>Audit: onSessionEvent(StrategyChangeRequested)
-    activate Audit
+    Session->>+Audit: onSessionEvent(StrategyChangeRequested)
     Audit->>Audit: log("change to Descending")
     deactivate Audit
     deactivate Session
@@ -179,34 +193,31 @@ sequenceDiagram
 
 ---
 
-## 6. Program startup: service registration and simulated `FileLogger`
+## 6. `Application::run()` — closing the session
 
-`FileLogger` does not actually write anything to disk — it only prints to
-the console what command it would execute. This means its constructor
-**cannot throw an exception** — there is no I/O operation that could fail.
+`Application` calls `session_->closeSession()` directly (not through the GUI).
+`SessionManagement` broadcasts `SessionClosing` to all observers.
+`SessionAuditObserver` logs the event and returns — it is owned by `Application`
+as a `shared_ptr` and is destroyed only when `Application` itself goes out of
+scope, not inside the observer callback.
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Main as main()
-    participant FL as FileLogger
-    participant SL as ServiceLocator
+    participant App as Application
+    participant Session as SessionManagement
+    participant Eng as Engine
+    participant Audit as SessionAuditObserver
 
-    Main->>FL: new FileLogger("engine_log.txt")
-    activate FL
-    FL->>FL: std::cout << "command: create file" (simulation)
-    deactivate FL
-    Note right of Main: constructor CANNOT throw<br/>an exception — no real I/O
-
-    Main->>SL: provide<FileLogger>(fileLogger)
-    Main->>SL: appFileLogger()
-    activate SL
-    SL-->>Main: FileLogger&
-    deactivate SL
-    Main->>FL: log("=== Program start ===")
-    activate FL
-    FL->>FL: std::cout << "command: append to file" (simulation)
-    deactivate FL
+    App->>+Session: session_->closeSession()
+    Session->>+Eng: onSessionEvent(SessionClosing)
+    Eng->>Eng: stop()
+    deactivate Eng
+    Session->>+Audit: onSessionEvent(SessionClosing)
+    Audit->>Audit: log("session closed")
+    deactivate Audit
+    deactivate Session
+    Note right of App: Application still holds shared_ptr<Audit>;<br/>Audit destroyed when Application is destroyed
 ```
 
 ---

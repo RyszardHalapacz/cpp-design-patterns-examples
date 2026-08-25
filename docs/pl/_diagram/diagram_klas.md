@@ -14,16 +14,22 @@ nadal czytelnie opisuje wszystkie relacje.
 classDiagram
     direction TB
 
-    class IService { <<interface>> }
-    class ISessionObserver { <<interface>> }
-    class ISortStrategy { <<interface>> }
-    class SessionEstablisher { <<abstract>> }
+    %% ─── Interfejsy / klasy abstrakcyjne ───────────────────────────────────────
+    class IService            { <<interface>> }
+    class ISessionObserver    { <<interface>> }
+    class ISortStrategy       { <<interface>> }
+    class ISortStrategyFactory{ <<interface>> }
+    class IGui                { <<interface>> }
+    class SessionCoordinator  { <<abstract>> }
 
+    %% ─── Klasy konkretne ────────────────────────────────────────────────────────
+    class Application
     class Logger
     class FileLogger
     class DoSomething
     class ServiceLocator
     class Engine
+    class EngineHistorian
     class SessionAuditObserver
     class SessionManagement
     class AscendingSortStrategy
@@ -31,79 +37,138 @@ classDiagram
     class BubbleSortStrategy
     class SortStrategyFactory
     class DummyGui
+    class DummyGuiAdapter
     class CommandBatchBuilder
     class Configurator
-    class EngineSessionEstablisher
+    class EngineSessionCoordinator
     class SortStrategyId { <<enumeration>> }
 
+    %% ─── Application: korzeń grafu obiektów ────────────────────────────────────
+    Application *-- IGui                  : unique_ptr
+    Application *-- Configurator          : przez wartość
+    Application o-- Engine                : shared_ptr
+    Application o-- ISortStrategyFactory  : shared_ptr
+    Application o-- EngineHistorian       : shared_ptr
+    Application o-- SessionManagement     : shared_ptr
+    Application o-- SessionAuditObserver  : shared_ptr
+    Application ..> EngineSessionCoordinator : tworzy w configure()
+
+    %% ─── Usługi (ServiceLocator) ────────────────────────────────────────────────
     IService <|.. Logger
     IService <|.. FileLogger
     IService <|.. DoSomething
-    ServiceLocator o-- IService : rejestruje po typie
+    ServiceLocator o-- IService : mapa shared_ptr
 
+    %% ─── Wzorzec Observer ───────────────────────────────────────────────────────
     ISessionObserver <|.. Engine
     ISessionObserver <|.. SessionAuditObserver
-    SessionManagement o-- ISessionObserver : obserwatorzy
-    SessionManagement --> Engine : steruje
-    SessionManagement ..> SortStrategyId : notify przenosi enum
+    SessionManagement o-- ISessionObserver : weak_ptr[]
+    SessionManagement --> Engine           : weak_ptr
 
+    %% ─── Strategia + Fabryka ────────────────────────────────────────────────────
     ISortStrategy <|.. AscendingSortStrategy
     ISortStrategy <|.. DescendingSortStrategy
     ISortStrategy <|.. BubbleSortStrategy
-    Engine *-- ISortStrategy : posiada strategię
-    Engine ..> SortStrategyFactory : tworzy strategię
+    Engine *-- ISortStrategy         : unique_ptr
+    Engine --> ISortStrategyFactory  : weak_ptr
+    Engine --> EngineHistorian       : weak_ptr
+    ISortStrategyFactory <|.. SortStrategyFactory
     SortStrategyFactory ..> ISortStrategy : tworzy
 
-    DummyGui --> SessionManagement : woła metody
-    DummyGui *-- CommandBatchBuilder : buduje paczki
-    DummyGui ..> SortStrategyId : clickSetSortStrategy(id)
+    %% ─── Wzorzec Adapter ────────────────────────────────────────────────────────
+    IGui <|.. DummyGuiAdapter
+    DummyGuiAdapter *-- DummyGui        : unique_ptr
+    DummyGui *-- CommandBatchBuilder    : przez wartość
 
-    Configurator --> DummyGui : konfiguruje
-    Configurator --> SessionManagement : ustala politykę
+    %% ─── Metoda Szablonowa ──────────────────────────────────────────────────────
+    SessionCoordinator <|-- EngineSessionCoordinator
+    EngineSessionCoordinator --> SessionManagement   : referencja
+    EngineSessionCoordinator --> Engine              : shared_ptr
+    EngineSessionCoordinator --> EngineHistorian     : shared_ptr
 
-    SessionEstablisher <|-- EngineSessionEstablisher
-    EngineSessionEstablisher --> SessionManagement : łączy
-    EngineSessionEstablisher --> Engine : łączy
+    %% ─── Configurator ───────────────────────────────────────────────────────────
+    Configurator ..> DummyGuiAdapter   : rejestruje handlery
+    Configurator ..> SessionManagement : ustala politykę
 
     classDef interfaceStyle fill:#EEEDFE,stroke:#7F77DD,color:#26215C
-    classDef serviceStyle fill:#E1F5EE,stroke:#0F6E56,color:#0B3D30
-    classDef coreStyle fill:#FAECE7,stroke:#D85A30,color:#4A1B0C
-    classDef guiStyle fill:#FFF6DE,stroke:#C08A00,color:#4A3900
-    classDef newStyle fill:#FDE8D7,stroke:#B8551A,color:#5C2A0D
+    classDef serviceStyle   fill:#E1F5EE,stroke:#0F6E56,color:#0B3D30
+    classDef coreStyle      fill:#FAECE7,stroke:#D85A30,color:#4A1B0C
+    classDef guiStyle       fill:#FFF6DE,stroke:#C08A00,color:#4A3900
+    classDef appStyle       fill:#E8F4FD,stroke:#2980B9,color:#1A3A4A
+    classDef newStyle       fill:#FDE8D7,stroke:#B8551A,color:#5C2A0D
 
-    cssClass "IService,ISessionObserver,ISortStrategy,SessionEstablisher" interfaceStyle
+    cssClass "IService,ISessionObserver,ISortStrategy,ISortStrategyFactory,IGui,SessionCoordinator" interfaceStyle
     cssClass "Logger,FileLogger,DoSomething,ServiceLocator" serviceStyle
-    cssClass "Engine,SessionManagement,SessionAuditObserver,EngineSessionEstablisher" coreStyle
-    cssClass "DummyGui,Configurator,CommandBatchBuilder,AscendingSortStrategy,DescendingSortStrategy,BubbleSortStrategy" guiStyle
+    cssClass "Engine,SessionManagement,SessionAuditObserver,EngineSessionCoordinator,EngineHistorian" coreStyle
+    cssClass "DummyGui,DummyGuiAdapter,Configurator,CommandBatchBuilder,AscendingSortStrategy,DescendingSortStrategy,BubbleSortStrategy" guiStyle
+    cssClass "Application" appStyle
     cssClass "SortStrategyFactory,SortStrategyId" newStyle
 ```
 
 ## Grupy kolorystyczne
 
-- **fioletowy** — interfejsy/klasy abstrakcyjne (`IService`, `ISessionObserver`, `ISortStrategy`, `SessionEstablisher`)
+- **niebieski** — `Application` — korzeń grafu obiektów; właściciel wszystkich obiektów najwyższego poziomu
+- **fioletowy** — interfejsy/klasy abstrakcyjne (`IService`, `ISessionObserver`, `ISortStrategy`, `ISortStrategyFactory`, `IGui`, `SessionCoordinator`)
 - **zielony** — usługi rejestrowane w `ServiceLocator` (`Logger`, `FileLogger`, `DoSomething`, sam `ServiceLocator`)
-- **koralowy** — rdzeń logiki sesji (`Engine`, `SessionManagement`, `SessionAuditObserver`, `EngineSessionEstablisher`)
-- **żółty** — GUI, konfiguracja, strategie konkretne (`DummyGui`, `Configurator`, `CommandBatchBuilder`, trzy klasy strategii)
+- **koralowy** — rdzeń logiki sesji (`Engine`, `EngineHistorian`, `SessionManagement`, `SessionAuditObserver`, `EngineSessionCoordinator`)
+- **żółty** — GUI, konfiguracja, strategie konkretne (`DummyGui`, `DummyGuiAdapter`, `Configurator`, `CommandBatchBuilder`, trzy klasy strategii)
 - **pomarańczowy** — najnowsze dodatki (`SortStrategyFactory`, `SortStrategyId`)
 
 ## Legenda notacji UML
 
 | Symbol | Nazwa | Znaczenie | Przykład w kodzie |
 |---|---|---|---|
-| `▷──` (linia ciągła, pusty trójkąt) | Generalizacja (dziedziczenie) | Klasa pochodna dziedziczy implementację po klasie bazowej | `EngineSessionEstablisher : public SessionEstablisher` |
+| `▷──` (linia ciągła, pusty trójkąt) | Generalizacja (dziedziczenie) | Klasa pochodna dziedziczy implementację po klasie bazowej | `EngineSessionCoordinator : public SessionCoordinator` |
 | `▷┄┄` (linia przerywana, pusty trójkąt) | Realizacja (implementacja interfejsu) | Klasa implementuje czysto abstrakcyjny interfejs | `class Engine : public ISessionObserver` |
-| `◆──` (pełny romb) | Kompozycja | Silne posiadanie — część nie istnieje bez całości (`unique_ptr`, pole wartościowe) | `Engine` posiada `unique_ptr<ISortStrategy>` |
-| `◇──` (pusty romb) | Agregacja | Słabe posiadanie — część może istnieć niezależnie od całości (surowy wskaźnik, `shared_ptr`) | `SessionManagement` trzyma `vector<ISessionObserver*>` |
-| `──>` (zwykła strzałka, linia ciągła) | Asocjacja | Jedna klasa trwale zna/steruje drugą | `SessionManagement --> Engine` |
-| `┄┄>` (zwykła strzałka, linia przerywana) | Zależność | Jedna klasa używa drugiej doraźnie (jedno wywołanie), bez trzymania referencji | `Engine ..> SortStrategyFactory` |
+| `◆──` (pełny romb) | Kompozycja | Silne posiadanie — część nie istnieje bez całości (`unique_ptr`, pole wartościowe) | `Application` posiada `unique_ptr<IGui>` |
+| `◇──` (pusty romb) | Agregacja | Współposiadanie — część może przeżyć właściciela (`shared_ptr`) | `Application o-- Engine` (shared_ptr) |
+| `──>` (zwykła strzałka, linia ciągła) | Asocjacja | Jedna klasa trwale trzyma (ewentualnie słabą) referencję do drugiej | `Engine --> EngineHistorian : weak_ptr` |
+| `┄┄>` (zwykła strzałka, linia przerywana) | Zależność | Jedna klasa używa drugiej lokalnie (parametr, zmienna lokalna) — bez pola składowego | `Configurator ..> DummyGuiAdapter` |
 
 ## Skąd bierze się każda relacja w kodzie
 
-- `IService <|.. Logger/FileLogger/DoSomething` — wszystkie trzy dziedziczą po `IService` (realizacja interfejsu), co pozwala `ServiceLocator` trzymać je w jednej, heterogenicznej kolekcji.
-- `ServiceLocator o-- IService` — `ServiceLocator` trzyma `unordered_map<type_index, shared_ptr<IService>>`; to agregacja, bo `shared_ptr` oznacza współdzieloną, a nie wyłączną własność.
-- `ISessionObserver <|.. Engine/SessionAuditObserver` — obie klasy implementują `onSessionEvent()`.
-- `SessionManagement o-- ISessionObserver` — lista obserwatorów to surowe wskaźniki (`vector<ISessionObserver*>`), stąd agregacja, nie kompozycja.
-- `Engine *-- ISortStrategy` — `Engine` trzyma `unique_ptr<ISortStrategy>`, czyli wyłączną własność — kompozycja.
-- `Engine ..> SortStrategyFactory` i `SortStrategyFactory ..> ISortStrategy` — fabryka jest wołana metodą statyczną, nikt jej nie przechowuje jako pola — to zależność, nie asocjacja.
-- `DummyGui *-- CommandBatchBuilder` — pole wartościowe (nie wskaźnik), więc kompozycja.
-- `DummyGui/SessionManagement ..> SortStrategyId` — obie klasy przyjmują ten enum jako parametr metody, ale go nie przechowują — zależność.
+**Własności Application (Application.hpp / Application.cpp)**
+
+```
+unique_ptr<IGui>                   gui_          → kompozycja   (wyłączne posiadanie)
+Configurator                       configurator_  → kompozycja   (pole wartościowe)
+shared_ptr<Engine>                 engine_        → agregacja    (współposiada z koordynatorem)
+shared_ptr<ISortStrategyFactory>   factory_       → agregacja    (utrzymuje factory żywą dla weak_ptr Engine)
+shared_ptr<EngineHistorian>        historian_     → agregacja    (utrzymuje historiana żywego dla weak_ptr Engine)
+shared_ptr<SessionManagement>      session_       → agregacja
+shared_ptr<SessionAuditObserver>   audit_         → agregacja    (czas życia obserwatora niezależny od sesji)
+EngineSessionCoordinator           (zmienna lokalna) → zależność (tworzony i niszczony w configure())
+```
+
+**Engine (Engine.hpp)**
+
+```
+unique_ptr<ISortStrategy>          sortStrategy_  → kompozycja  (zamiana strategii zastępuje stary obiekt)
+weak_ptr<ISortStrategyFactory>     factory_       → asocjacja   (Application utrzymuje przy życiu; Engine używa per zdarzenie)
+weak_ptr<EngineHistorian>          historian_     → asocjacja   (Application utrzymuje przy życiu; disableHistorian() wygasza weak_ptr)
+```
+
+**SessionManagement (SessionManagement.hpp)**
+
+```
+weak_ptr<Engine>                   engine_        → asocjacja   (Engine posiadany przez Application, nie przez sesję)
+vector<weak_ptr<ISessionObserver>> observers_     → agregacja   (wygasłe obserwatory usuwane automatycznie)
+```
+
+**Wzorzec Adapter (DummyGuiAdapter.hpp)**
+
+```
+DummyGuiAdapter implementuje IGui — Application widzi tylko IGui
+unique_ptr<DummyGui> gui_          → kompozycja  (jedyny właściciel; deleteGUI() przez default_delete)
+CommandBatchBuilder  batchBuilder_ → kompozycja  (pole wartościowe w DummyGui)
+```
+
+**Metoda Szablonowa (SessionCoordinator.hpp)**
+
+```
+EngineSessionCoordinator posiada:
+  SessionManagement&                session_   → asocjacja  (referencja, nie posiadanie)
+  shared_ptr<Engine>                engine_    → agregacja  (współposiada podczas establish())
+  shared_ptr<ISortStrategyFactory>  factory_   → agregacja  (współposiada podczas establish())
+  shared_ptr<EngineHistorian>       historian_ → agregacja  (współposiada; enableHistorian() tworzy nowy)
+```
