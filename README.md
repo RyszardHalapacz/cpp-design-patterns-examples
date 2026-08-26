@@ -35,7 +35,7 @@ At a glance, the project also covers:
 - **Ownership & lifetime** — `shared_ptr`/`weak_ptr` ownership graphs, Rule of Zero, `weak_ptr` as a disconnect mechanism
 - **Multi-component CMake** — separate libraries, `FetchContent`, `enable_testing()` placement
 - **GoF patterns working together** — all patterns integrated into one coherent system, not isolated snippets
-- **Unit + component testing** — Google Test unit tests and an `Engine` component test harness
+- **Unit + component testing** — Google Test unit tests and a strict `Engine` component test harness with selective channel activation
 - **CI + documentation** — GitHub Actions workflow, Mermaid diagrams, bilingual lecture notes
 
 ---
@@ -59,7 +59,7 @@ At a glance, the project also covers:
 - `TEST_F` — fixture-based tests with shared `SetUp`
 - `TEST_P` — parameterized tests (one test body, multiple data sets)
 - Stdout capture via `testing::internal::CaptureStdout()`
-- 93 tests across 8 test files — verify live with `ctest --test-dir build`
+- 126 tests across 8 test files — verify live with `ctest --test-dir build`
 
 ### C++23 features
 - **`std::expected<T, E>`** — `ServiceLocator` and `SortStrategyFactory` return `expected` instead of throwing; callers handle errors explicitly
@@ -90,67 +90,128 @@ observable at the component boundary is asserted — internals are not inspected
 
 ### Test architecture
 
-The harness builds the minimal environment needed to run `Engine`:
-
 ```
-                EngineComponentTest
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-    HistorianSpy              FactoryStub
-          ▲                         ▲
-          │                         │
-          └──────── Engine ─────────┘
+              EngineTestBase (::testing::Test)
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+ EngineComponent  Historian    Factory
+ Test             OnlyTest     OnlyTest
+ ─────────────    ─────────    ──────────
+ HistorianSpy     HistorianSpy  FactorySpy
+ FactorySpy
 ```
 
 `Engine` remains unaware it is under test.
 Production dependencies are replaced by test doubles wired through the same public interfaces:
 
 ```
-IHistorian ──── EngineHistorian   (production)
-           └─── HistorianSpy      (component test)
+IHistorian           ──── HistorianSpy      (channel ON)
+                     └─── NullHistorian     (channel OFF)
+
+ISortStrategyFactory ──── FactorySpy        (channel ON)
+                     └─── SortStrategyFactory (channel OFF, real)
 ```
 
-- **`HistorianSpy`** — observation point on the `IHistorian` boundary; records every command name
-  and snapshot that `Engine` publishes
-- **`FactorySpy`** — observation point on the `ISortStrategyFactory` boundary; records which
-  strategy IDs `Engine` requests and delegates to the real factory
-- **`EngineDriver`** — sends stimuli to the SUT and asserts observable reactions at the boundary
+- **`HistorianSpy`** — observation point on the `IHistorian` boundary; reports every
+  `recordCommand` and `publishSnapshot` call to `ScenarioVerifier`
+- **`FactorySpy`** — observation point on the `ISortStrategyFactory` boundary; reports
+  `create()` calls to `ScenarioVerifier` and delegates to the real factory
+- **`EngineDriver`** — sends stimuli to the SUT and runs per-step strict verification
 
-### Flow-based testing
+### Scenario protocol — Stimulus + Expectation
 
-Tests are expressed as receive/send signal pairs:
+Tests are expressed as sequences of typed signals:
 
-```
-receiveAddVector   →  sendAddVector
-receiveSortVector  →  sendSortVector
-receiveSetStrategy →  sendSetStrategy
-receiveSnapshot    →  sendSnapshot
+```cpp
+driver.run({
+    receiveVectorAdded({1, 2, 3}),                   // Stimulus  → drives Engine
+    expectHistorianCommand("addVector", {1, 2, 3}),  // Expectation → must emerge
+});
 ```
 
 `receive*` delivers a stimulus to `Engine`.
-`send*` asserts the expected behaviour at the component boundary.
-This verifies not just individual return values but the order and flow of the entire
-component's communication.
+`expect*` declares the exact signal that must cross the component boundary in response.
 
-### Design rationale
+Verification is **strict and ordered within each step**:
+- Undeclared signal from an active channel → `"Unexpected signal"` (immediate failure)
+- Signals arriving in wrong order → `"Unexpected signal"`
+- Expected signal that never arrives → `"Signal not received"`
 
-The fixture uses multiple inheritance to declare which communication channels are active:
+### Selective channel activation
+
+Fixture topology is declared via multiple inheritance — no configuration code needed:
 
 ```cpp
-class EngineComponentTest
-    : public ::testing::Test,
-      public HistorianSpy,  // enables Engine ↔ Historian channel
-      public FactorySpy {}; // enables Engine ↔ Factory channel
+class EngineComponentTest : public EngineTestBase,
+                             public HistorianSpy,    // historian channel ON
+                             public FactorySpy   {}; // factory channel ON
+
+class HistorianOnlyTest   : public EngineTestBase,
+                             public HistorianSpy  {}; // only historian ON
+
+class FactoryOnlyTest     : public EngineTestBase,
+                             public FactorySpy    {}; // only factory ON
 ```
 
-`EngineDriver` uses `dynamic_cast` to detect which capabilities the fixture exposes.
-Inheriting from a spy enables the entire channel; removing a base class disables it —
-which is more readable than toggling individual signals when the number of signals grows.
+`EngineTestBase::SetUp()` uses `dynamic_cast` to detect which spies the concrete fixture
+provides, then builds an `ActiveChannels` object that carries the topology to `EngineDriver`:
 
-The current implementation is deliberately synchronous, separating the testing model from
-concurrency concerns. The architecture allows `Engine` to move to a dedicated thread in the
-future, with direct calls replaced by message queues and timeout-based expectations.
+```cpp
+auto* h = dynamic_cast<HistorianSpy*>(this);
+auto* f = dynamic_cast<FactorySpy*>(this);
+channels_ = {h != nullptr, f != nullptr};
+```
+
+`ActiveChannels` serves two roles:
+1. **Engine wiring** — active spy is connected; inactive channel gets a real or null collaborator
+2. **Expectation filtering** — `EngineDriver` silently skips `expect*` entries for inactive endpoints (not a failure)
+
+The same pre-built scenario works unchanged across all fixture topologies:
+
+```
+Scenarios::SetStrategy(Descending):
+  receiveStrategyChange(...)    Stimulus  → always executed
+  expectFactoryCreate(...)      Factory ON  → VERIFY  |  Factory OFF → SKIP
+  expectHistorianCommand(...)   Historian ON  → VERIFY  |  Historian OFF → SKIP
+```
+
+### Empty contract semantics
+
+An empty expectation list for an active channel means **strict zero**: any signal from
+that channel produces `"Unexpected signal"`. Empty ≠ "don't care":
+
+```cpp
+TEST_F(EngineComponentTest, LocalScenario) {
+    driver.run({
+        receiveVectorAdded({10, 20, 30}),
+      //  expectHistorianCommand(...)     ← commented out
+    });
+    // Both channels active + zero expectations = zero-tolerance.
+    // Engine calls historian.recordCommand() → "Unexpected signal".
+}
+```
+
+### Lifetime — weak_ptr and keepers
+
+`Engine` stores `historian` and `factory` via `weak_ptr`. Spies are base-class sub-objects
+of the fixture (not heap-allocated). `EngineTestBase` holds `historianKeeper_` and
+`factoryKeeper_` — `shared_ptr`s with a no-op deleter that keep the control block alive for
+the fixture's entire lifetime:
+
+```cpp
+historianKeeper_ = std::shared_ptr<IHistorian>(h, [](auto*){});  // no-op deleter
+engine_->setHistorian(historianKeeper_);   // Engine's weak_ptr has a live control block
+```
+
+`TearDown()` resets `engine_` before base-class destructors destroy spy sub-objects:
+
+```
+1. TearDown()      → engine_.reset()   Engine destroyed; keepers and spies still alive
+2. ~FactorySpy()
+3. ~HistorianSpy()
+4. ~EngineTestBase()                   keepers destroyed
+```
 
 ### Running the component test
 
@@ -161,39 +222,28 @@ cmake --build build --parallel
 # Run all component tests
 ./build/components/engine/component_test/engine_component_tests
 
-# Run a specific test case
-./build/components/engine/component_test/engine_component_tests --gtest_filter="EngineComponentTest.RunExecutesAllSignals"
+# Run a specific fixture
+./build/components/engine/component_test/engine_component_tests \
+    --gtest_filter="HistorianOnlyTest.*"
 ```
 
-### Enabling and disabling channels
-
-Removing a base class from the fixture disables the entire channel — all `send*` lambdas
-for that spy return `false` and the rows disappear from the diagram without touching `EngineDriver`:
-
-```cpp
-class EngineComponentTest
-    : public ::testing::Test,
-      public HistorianSpy,   // remove → disables Engine ↔ Historian channel
-      public FactorySpy {};  // remove → disables Engine ↔ Factory channel
-```
-
-### Sample output (both channels active)
+### Sample output (FullEngineFlow, both channels active)
 
 ```
-[Driver] ---receiveAddVector------> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: vector added
-                                    [Engine] ---sendAddVector---------> [HistorianSpy]
-[Driver] ---receiveSortVector-----> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: sort requested
-                                                                                            # [Engine] Sorting with strategy: Ascending
-                                    [Engine] ---sendSortVector---------> [HistorianSpy]
-[Driver] ---receiveSetStrategy----> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: strategy change requested
-                                                                                            # [Engine] Sort strategy set: Descending
-                                    [Engine] ---sendSetStrategy-------> [FactorySpy]
-[Driver] ---receiveSnapshot-------> [Engine]
-                                    [Engine] ---sendSnapshot-----------> [HistorianSpy]
+[Driver] ---receiveVectorAdded-----------> [Engine]                       # [Engine] Event received: session state changed
+                                           [Engine] ---recordCommand-----> [HistorianSpy]
+[Driver] ---receiveSortRequested---------> [Engine]                       # [Engine] Event received: session state changed
+                                           [Engine] ---recordCommand-----> [HistorianSpy]
+[Driver] ---receiveStrategyChange--------> [Engine]                       # [Engine] Event received: session state changed
+                                           [Engine] ---create------------> [FactorySpy]
+                                           [Engine] ---recordCommand-----> [HistorianSpy]
+[Driver] ---receivePublishSnapshot-------> [Engine]
+                                           [Engine] ---publishSnapshot---> [HistorianSpy]
 ```
+
+The current implementation is deliberately synchronous, separating the testing model from
+concurrency concerns. The architecture allows `Engine` to move to a dedicated thread in the
+future, with direct calls replaced by message queues and timeout-based expectations.
 
 ---
 

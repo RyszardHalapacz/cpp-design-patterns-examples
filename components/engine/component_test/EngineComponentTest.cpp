@@ -1,194 +1,155 @@
 #include <gtest/gtest.h>
-#include <format>
-#include <iostream>
+#include <gtest/gtest-spi.h>  // EXPECT_NONFATAL_FAILURE
+#include <any>
 #include <memory>
-#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "patterns/engine/Engine.hpp"
 #include "patterns/historian/IHistorian.hpp"
-#include "patterns/strategy/ISortStrategyFactory.hpp"
-#include "patterns/observer/SessionEvent.hpp"
-#include "patterns/strategy/SortStrategyFactory.hpp"
 #include "patterns/services/ServiceLocator.hpp"
 #include "patterns/services/Logger.hpp"
+#include "patterns/strategy/SortStrategyId.hpp"
+#include "patterns/strategy/SortStrategyFactory.hpp"
 
-using namespace patterns::historian;
-using namespace patterns::strategy;
-using namespace patterns::observer;
+#include "scenario/Signal.hpp"
+#include "scenario/ScenarioVerifier.hpp"
+#include "scenario/Spies.hpp"
+#include "scenario/Scenarios.hpp"
+#include "EngineDriver.hpp"
+
 using namespace patterns::services;
+using namespace patterns::strategy;
+using namespace patterns::historian;
 
-// ─── Endpoint ─────────────────────────────────────────────────────────────────
-enum class Endpoint { Driver, Engine, Historian, Factory };
+// ─── NullHistorian ────────────────────────────────────────────────────────────
+// No-op IHistorian for fixtures that do not inherit HistorianSpy.
+// Prevents null-dereference when Engine calls historian and no spy is wired.
 
-// ─── SequenceLog ──────────────────────────────────────────────────────────────
-// Prints ASCII sequence-diagram rows with fixed lifeline columns.
+struct NullHistorian : patterns::historian::IHistorian {
+    void recordCommand(const patterns::historian::CommandHistory&) override {}
+    void publishSnapshot(const patterns::historian::EngineSnapshot&) override {}
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ScenarioFrameworkTest
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests the verification framework itself using EXPECT_NONFATAL_FAILURE.
+// Verifies that ScenarioVerifier correctly detects every class of contract
+// violation — without involving a real Engine.
 //
-// Fixed column layout:
-//   col 0        col 36        col 72            col 92
-//   [Driver]     [Engine]      [HistorianSpy]    # comment
-//                [Engine]      [FactorySpy]      # comment
+// These are regression tests for the framework, not for Engine behaviour.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class ScenarioFrameworkTest : public ::testing::Test {
+protected:
+    ScenarioVerifier verifier_;
+
+    // ── Helpers: build SignalDescriptors with real payload types ───────────────
+
+    static SignalDescriptor historianCommand(std::string name,
+                                             std::vector<int> data = {}) {
+        return {Endpoint::Engine, Endpoint::Historian, "recordCommand",
+                std::any{CommandHistory{std::move(name), std::move(data)}}};
+    }
+
+    static SignalDescriptor historianSnapshot(size_t vectorCount = 0) {
+        EngineSnapshot snap;
+        snap.vectorCount = vectorCount;
+        return {Endpoint::Engine, Endpoint::Historian, "publishSnapshot",
+                std::any{snap}};
+    }
+
+    static SignalDescriptor factoryCreate(SortStrategyId id) {
+        return {Endpoint::Engine, Endpoint::Factory, "create", std::any{id}};
+    }
+};
+
+// Actual signal arrives with no expectation registered → Unexpected signal.
+TEST_F(ScenarioFrameworkTest, UnexpectedSignal_NoExpectation) {
+    verifier_.setExpected({});
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.report(historianCommand("addVector")),
+        "Unexpected signal"
+    );
+}
+
+// Expected signal never arrives → Signal not received.
+TEST_F(ScenarioFrameworkTest, SignalNotReceived) {
+    verifier_.setExpected({expectHistorianCommand("addVector")});
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.verifyComplete(),
+        "Signal not received"
+    );
+}
+
+// Signals arrive in wrong order within a step.
+// Expected: recordCommand then publishSnapshot.
+// Received: publishSnapshot first.
+TEST_F(ScenarioFrameworkTest, WrongOrder) {
+    verifier_.setExpected({
+        expectHistorianCommand("addVector"),
+        expectHistorianSnapshot(),
+    });
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.report(historianSnapshot(0)),
+        "Unexpected signal"
+    );
+}
+
+// Correct signal name and endpoint, but wrong payload data.
+TEST_F(ScenarioFrameworkTest, PayloadMismatch) {
+    verifier_.setExpected({expectHistorianCommand("addVector", {{1, 2, 3}})});
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.report(historianCommand("addVector", {9, 9, 9})),
+        "payload mismatch"
+    );
+}
+
+// Regression test for rev 1 bug: signal produced during Step 1 must not
+// satisfy an expectation belonging to Step 2.
 //
-// Invariant: [Engine] always starts at kEngineCol regardless of direction.
+// Simulates: publishSnapshot sent during addVector processing (wrong step).
+// Step 1 knows only about recordCommand, so publishSnapshot is Unexpected.
+TEST_F(ScenarioFrameworkTest, SignalFromWrongStep_RegressionRev1) {
+    // Step 1 scope: only recordCommand expected.
+    verifier_.setExpected({expectHistorianCommand("addVector")});
 
-class SequenceLog {
-public:
-    static constexpr int kDriverCol   =  0;
-    static constexpr int kEngineCol   = 36;
-    static constexpr int kObserverCol = 72;
-    static constexpr int kCommentCol  = 92;
+    // recordCommand arrives → OK.
+    verifier_.report(historianCommand("addVector"));
 
-    // Draws one sequence-diagram row.
-    // `captured` is the stdout produced during the signal; lines appear after '#'.
-    static void logFlow(Endpoint           from,
-                        Endpoint           to,
-                        const std::string& signal,
-                        const std::string& captured = {})
-    {
-        int  fromC = colOf(from);
-        int  toC   = colOf(to);
-        auto fromL = std::string(labelOf(from));
-        auto toL   = std::string(labelOf(to));
+    // publishSnapshot arrives still inside Step 1 — no expectation for it.
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.report(historianSnapshot(0)),
+        "Unexpected signal"
+    );
+}
 
-        std::string line;
+// ═══════════════════════════════════════════════════════════════════════════════
+// EngineTestBase
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared base for all Engine component test fixtures.
+//
+// SetUp():
+//   Detects active channels via dynamic_cast on the concrete fixture type.
+//   Builds ActiveChannels and stores it in channels_ for use by EngineDriver.
+//   Wires the spy (if active) or a real/null implementation.
+//
+//   Engine stores collaborators via weak_ptr. To keep control blocks alive,
+//   historianKeeper_ and factoryKeeper_ hold the shared_ptrs for the fixture's
+//   entire lifetime.
+//
+// TearDown():
+//   Resets engine_ before spy sub-objects are destroyed by base-class dtors.
+//   Ensures Engine is gone while all control blocks and spy objects still live.
+//
+// Ownership of spy sub-objects:
+//   Spies are base-class sub-objects of the concrete fixture (same lifetime).
+//   Engine receives a non-owning shared_ptr (no-op deleter) stored in a keeper.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-        if (fromC <= toC) {
-            // ── left-to-right: [from] ---signal{fills}> [to] ────────────────
-            // Arrow format: " ---{signal}{fills}> " = 6 + signal + fills chars
-            int arrowLen = toC - (fromC + static_cast<int>(fromL.size()));
-            int fills    = std::max(arrowLen - 6 - static_cast<int>(signal.size()), 0);
-            std::string arrow = std::format(" ---{}{}>", signal, std::string(fills, '-')) + " ";
-            line = std::format("{}{}{}{}", spaces(fromC), fromL, arrow, toL);
-        } else {
-            // ── right-to-left: [to] <---{signal}{fills} [from] ──────────────
-            // Arrow format: " <---{signal}{fills} " = 6 + signal + fills chars
-            int arrowLen = fromC - (toC + static_cast<int>(toL.size()));
-            int fills    = std::max(arrowLen - 6 - static_cast<int>(signal.size()), 0);
-            std::string arrow = std::format(" <---{}{} ", signal, std::string(fills, '-'));
-            line = std::format("{}{}{}{}", spaces(toC), toL, arrow, fromL);
-        }
-
-        // ── split captured stdout into remark lines ───────────────────────────
-        std::vector<std::string> remarks;
-        {
-            std::istringstream iss(captured);
-            std::string ln;
-            while (std::getline(iss, ln))
-                if (!ln.empty()) remarks.push_back(ln);
-        }
-
-        // First remark on the same row; extra remarks on continuation rows.
-        if (!remarks.empty()) {
-            int gap = std::max(kCommentCol - static_cast<int>(line.size()), 2);
-            line += std::format("{:<{}}# {}", "", gap, remarks[0]);
-        }
-        std::cout << line << '\n';
-
-        for (std::size_t i = 1; i < remarks.size(); ++i)
-            std::cout << std::format("{:<{}}# {}\n", "", kCommentCol, remarks[i]);
-    }
-
-private:
-    static std::string spaces(int n) { return std::string(std::max(n, 0), ' '); }
-
-    static constexpr std::string_view labelOf(Endpoint e) noexcept {
-        switch (e) {
-            case Endpoint::Driver:    return "[Driver]";
-            case Endpoint::Engine:    return "[Engine]";
-            case Endpoint::Historian: return "[HistorianSpy]";
-            case Endpoint::Factory:   return "[FactorySpy]";
-        }
-        std::unreachable();
-    }
-
-    static constexpr int colOf(Endpoint e) noexcept {
-        switch (e) {
-            case Endpoint::Driver:    return kDriverCol;
-            case Endpoint::Engine:    return kEngineCol;
-            case Endpoint::Historian: return kObserverCol;
-            case Endpoint::Factory:   return kObserverCol;
-        }
-        std::unreachable();
-    }
-};
-
-// ─── HistorianSpy ─────────────────────────────────────────────────────────────
-// Implements IHistorian — same interface as the real EngineHistorian.
-// Records every call so tests can assert on what Engine reported.
-
-class HistorianSpy : public IHistorian {
-public:
-    void recordCommand(const CommandHistory& cmd) override {
-        commands.push_back(cmd);
-    }
-    void publishSnapshot(const EngineSnapshot& snap) override {
-        snapshots.push_back(snap);
-    }
-
-    std::vector<CommandHistory> commands;
-    std::vector<EngineSnapshot> snapshots;
-};
-
-// ─── FactorySpy ───────────────────────────────────────────────────────────────
-// Implements ISortStrategyFactory — same interface as the real SortStrategyFactory.
-// Delegates to the real factory; records which strategy ids were requested.
-
-class FactorySpy : public ISortStrategyFactory {
-public:
-    [[nodiscard]] std::expected<std::unique_ptr<ISortStrategy>, std::string>
-    create(SortStrategyId id) override {
-        requestedIds.push_back(id);
-        return real_.create(id);
-    }
-
-    std::vector<SortStrategyId> requestedIds;
-
-private:
-    SortStrategyFactory real_;
-};
-
-// ─── EngineDriver ─────────────────────────────────────────────────────────────
-// Holds a reference to Engine and exposes a table of signals.
-// owner_ is typed as ::testing::Test* so that signal lambdas can cross-cast it
-// to the specific spy type they want to observe.
-// The cast succeeds only when the concrete fixture inherits from that spy.
-
-class EngineDriver {
-public:
-    struct Signal {
-        std::string           name;
-        Endpoint              from;
-        Endpoint              to;
-        std::function<bool()> fn;  // returns false → channel inactive, skip diagram
-    };
-
-    EngineDriver(patterns::engine::Engine& engine, ::testing::Test* owner);
-
-    void run() {
-        for (auto& [name, from, to, fn] : signals) {
-            testing::internal::CaptureStdout();
-            bool active = fn();
-            std::string captured = testing::internal::GetCapturedStdout();
-            if (active)
-                SequenceLog::logFlow(from, to, name, captured);
-        }
-    }
-
-    std::vector<Signal> signals;
-
-private:
-    patterns::engine::Engine& engine_;
-    ::testing::Test*           owner_;
-
-};
-
-// ─── Fixture ──────────────────────────────────────────────────────────────────
-// Inherits from HistorianSpy and FactorySpy — so this IS the spy and the stub.
-// Non-owning shared_ptrs (spyKeeper_, factoryKeeper_) keep the engine's
-// weak_ptrs alive for the duration of the test.
-
-class EngineComponentTest : public ::testing::Test , public HistorianSpy, public FactorySpy {
+class EngineTestBase : public ::testing::Test {
 protected:
     void SetUp() override {
         [[maybe_unused]] auto r = ServiceLocator::instance().provide<Logger>(
@@ -196,119 +157,225 @@ protected:
 
         engine_ = std::make_shared<patterns::engine::Engine>();
 
-        if (auto* spy = dynamic_cast<HistorianSpy*>(this)) {
-            spyKeeper_ = std::shared_ptr<HistorianSpy>(spy, [](auto*) {});
-            engine_->setHistorian(spyKeeper_);
+        auto* h = dynamic_cast<HistorianSpy*>(this);
+        auto* f = dynamic_cast<FactorySpy*>(this);
+
+        // Result of dynamic_cast defines the fixture topology — stored in channels_
+        // for both Engine wiring and EngineDriver expectation filtering.
+        channels_ = {h != nullptr, f != nullptr};
+
+        // ── Historian channel ─────────────────────────────────────────────────
+        // Engine stores historian via weak_ptr; keeper extends control block lifetime.
+        if (h) {
+            h->attachVerifier(verifier_);
+            historianKeeper_ =
+                std::shared_ptr<patterns::historian::IHistorian>(h, [](auto*){});
+            engine_->setHistorian(historianKeeper_);
+        } else {
+            historianKeeper_ = std::make_shared<NullHistorian>();
+            engine_->setHistorian(historianKeeper_);
         }
-        if (auto* spy = dynamic_cast<FactorySpy*>(this)) {
-            factoryKeeper_ = std::shared_ptr<FactorySpy>(spy, [](auto*) {});
+
+        // ── Factory channel ───────────────────────────────────────────────────
+        // Engine stores factory via weak_ptr; keeper extends control block lifetime.
+        // setFactory calls factory->create(Ascending) internally.
+        // verifier_ not yet armed (armed_=false) → call silently ignored.
+        if (f) {
+            f->attachVerifier(verifier_);
+            factoryKeeper_ =
+                std::shared_ptr<patterns::strategy::ISortStrategyFactory>(f, [](auto*){});
+            engine_->setFactory(factoryKeeper_);
+        } else {
+            factoryKeeper_ =
+                std::make_shared<patterns::strategy::SortStrategyFactory>();
             engine_->setFactory(factoryKeeper_);
         }
     }
 
-    std::shared_ptr<patterns::engine::Engine> engine_;
-    std::shared_ptr<HistorianSpy>             spyKeeper_;
-    std::shared_ptr<FactorySpy>               factoryKeeper_;
+    void TearDown() override {
+        // Destroy Engine while keepers and spy sub-objects are still alive.
+        // Engine holds weak_ptrs to collaborators — must be destroyed before
+        // the control blocks (keepers) disappear.
+        engine_.reset();
+    }
+
+    ScenarioVerifier                                          verifier_;
+    std::shared_ptr<patterns::engine::Engine>                 engine_;
+    std::shared_ptr<patterns::historian::IHistorian>          historianKeeper_;
+    std::shared_ptr<patterns::strategy::ISortStrategyFactory> factoryKeeper_;
+    ActiveChannels                                            channels_;
 };
 
-// ─── EngineDriver constructor ─────────────────────────────────────────────────
-// Defined here — after EngineComponentTest is complete — so that the
-// cross-casts in signal lambdas operate on fully-defined types.
+// ═══════════════════════════════════════════════════════════════════════════════
+// EngineComponentTest — both historian and factory channels active
+// ─────────────────────────────────────────────────────────────────────────────
+// dynamic_cast<HistorianSpy*>(this) → non-null → HistorianSpy wired
+// dynamic_cast<FactorySpy*>(this)   → non-null → FactorySpy   wired
+// channels_ = { historian: true, factory: true }
+//
+// Every Engine→Historian and Engine→Factory call must be declared in the scenario.
+// No expectation is skipped by the channel filter.
+// ═══════════════════════════════════════════════════════════════════════════════
 
-EngineDriver::EngineDriver(patterns::engine::Engine& engine, ::testing::Test* owner)
-    : engine_(engine), owner_(owner)
-{
-    signals = {
-        // ── addVector ────────────────────────────────────────────────────────
-        { "receiveAddVector", Endpoint::Driver, Endpoint::Engine,
-          [this] {
-              engine_.onSessionEvent({SessionEventType::VectorAdded, {1, 2, 3}});
-              return true;
-          }
-        },
-        // send: 1. historian recorded the command name
-        //       2. historian recorded the exact vector payload
-        //       3. snapshot confirms the vector was actually stored (vectorCount == 1)
-        { "sendAddVector", Endpoint::Engine, Endpoint::Historian,
-          [this] {
-              auto* spy = dynamic_cast<HistorianSpy*>(owner_);
-              if (!spy) return false;
-              EXPECT_FALSE(spy->commands.empty());
-              EXPECT_EQ(spy->commands.back().commandName, "addVector");
-              EXPECT_EQ(spy->commands.back().data, (std::vector<int>{1, 2, 3}));
-              engine_.publishSnapshot();
-              EXPECT_FALSE(spy->snapshots.empty());
-              EXPECT_EQ(spy->snapshots.back().vectorCount, std::size_t{1});
-              return true;
-          }
-        },
+class EngineComponentTest : public EngineTestBase,
+                             public HistorianSpy,
+                             public FactorySpy {};
 
-        // ── sortVector ───────────────────────────────────────────────────────
-        { "receiveSortVector", Endpoint::Driver, Endpoint::Engine,
-          [this] {
-              engine_.onSessionEvent({SessionEventType::SortRequested, {}, 0});
-              return true;
-          }
-        },
-        { "sendSortVector", Endpoint::Engine, Endpoint::Historian,
-          [this] {
-              auto* spy = dynamic_cast<HistorianSpy*>(owner_);
-              if (!spy) return false;
-              EXPECT_FALSE(spy->commands.empty());
-              EXPECT_EQ(spy->commands.back().commandName, "sortVector");
-              return true;
-          }
-        },
+// ─── Framework self-check (uses real Engine + EngineDriver) ──────────────────
 
-        // ── setSortStrategy ──────────────────────────────────────────────────
-        { "receiveSetStrategy", Endpoint::Driver, Endpoint::Engine,
-          [this] {
-              engine_.onSessionEvent(
-                  {SessionEventType::StrategyChangeRequested, {}, 0, SortStrategyId::Descending});
-              return true;
-          }
-        },
-        { "sendSetStrategy", Endpoint::Engine, Endpoint::Factory,
-          [this] {
-              auto* stub = dynamic_cast<FactorySpy*>(owner_);
-              if (!stub) return false;
-              EXPECT_FALSE(stub->requestedIds.empty());
-              EXPECT_EQ(stub->requestedIds.back(), SortStrategyId::Descending);
-              return true;
-          }
-        },
-
-        // ── publishSnapshot ──────────────────────────────────────────────────
-        { "receiveSnapshot", Endpoint::Driver, Endpoint::Engine,
-          [this] {
-              engine_.publishSnapshot();
-              return true;
-          }
-        },
-        { "sendSnapshot", Endpoint::Engine, Endpoint::Historian,
-          [this] {
-              auto* spy = dynamic_cast<HistorianSpy*>(owner_);
-              if (!spy) return false;
-              EXPECT_FALSE(spy->snapshots.empty());
-              return true;
-          }
-        },
-    };
+// Expectation before the first Stimulus is a malformed scenario.
+// The framework must report this rather than silently ignore it.
+TEST_F(EngineComponentTest, MalformedScenario_ExpectationBeforeStimulus) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    EXPECT_NONFATAL_FAILURE(
+        driver.run({
+            expectHistorianCommand("addVector"),  // ← before any Stimulus
+            receiveVectorAdded({1, 2, 3}),
+        }),
+        "Malformed scenario"
+    );
 }
 
-// ─── Tests ────────────────────────────────────────────────────────────────────
+// ─── Engine component contracts ───────────────────────────────────────────────
 
-TEST_F(EngineComponentTest, RunExecutesAllSignals) {
-    EngineDriver driver(*engine_, this);
-    driver.run();
+// Contract: receiveAddVector → historian.recordCommand("addVector", data)
+TEST_F(EngineComponentTest, AddVector) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::AddVector({1, 2, 3}));
+}
 
-    // Check only channels that are active (base class present).
-    // Removing a base class disables the channel — the cast returns nullptr.
-    if (auto* spy = dynamic_cast<HistorianSpy*>(this)) {
-        EXPECT_FALSE(spy->commands.empty());
-        EXPECT_FALSE(spy->snapshots.empty());
-    }
-    if (auto* spy = dynamic_cast<FactorySpy*>(this)) {
-        EXPECT_FALSE(spy->requestedIds.empty());
-    }
+// Contract: receiveSortRequested → historian.recordCommand("sortVector")
+// Vector seeded before scenario — pre-run calls are not verified.
+TEST_F(EngineComponentTest, SortVector) {
+    engine_->addVector({5, 3, 1});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::SortVector(0));
+}
+
+// Contract: receiveStrategyChange(Descending)
+//   → factory.create(Descending)               } same step,
+//   → historian.recordCommand("setSortStrategy") } checked in order
+TEST_F(EngineComponentTest, SetStrategy) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::SetStrategy(SortStrategyId::Descending));
+}
+
+// Contract: receivePublishSnapshot → historian.publishSnapshot(vectorCount=1)
+TEST_F(EngineComponentTest, PublishSnapshot) {
+    engine_->addVector({1, 2, 3});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::PublishSnapshot(1));
+}
+
+// Full communication contract: AddVector → Sort → ChangeStrategy → Snapshot.
+// Each sub-scenario is a separate step; no cross-step signal leakage possible.
+TEST_F(EngineComponentTest, FullEngineFlow) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::FullEngineFlow());
+}
+
+// Ad-hoc local scenario — no pre-built collection needed.
+TEST_F(EngineComponentTest, LocalScenario) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({
+        receiveVectorAdded({10, 20, 30}),
+      //  expectHistorianCommand("addVector", {{10, 20, 30}}),
+      //   expectHistorianCommand("addVector", {{10, 20, 30}}),
+    });
+     driver.run({
+      //  receiveVectorAdded({10, 20, 30}),
+        expectHistorianCommand("addVector", {{10, 20, 30}}),
+      //   expectHistorianCommand("addVector", {{10, 20, 30}}),
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HistorianOnlyTest — historian channel only
+// ─────────────────────────────────────────────────────────────────────────────
+// dynamic_cast<HistorianSpy*>(this) → non-null → HistorianSpy wired
+// dynamic_cast<FactorySpy*>(this)   → null     → real SortStrategyFactory wired
+// channels_ = { historian: true, factory: false }
+//
+// EngineDriver filters expectations by channels_:
+//   expectHistorianCommand  → VERIFY
+//   expectHistorianSnapshot → VERIFY
+//   expectFactoryCreate     → SKIP  (not "Signal not received")
+//
+// The same pre-built Scenarios::* collections work without modification.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class HistorianOnlyTest : public EngineTestBase, public HistorianSpy {};
+
+TEST_F(HistorianOnlyTest, AddVector) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::AddVector({1, 2, 3}));
+}
+
+TEST_F(HistorianOnlyTest, SortVector) {
+    engine_->addVector({5, 3, 1});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::SortVector(0));
+}
+
+// Scenarios::SetStrategy contains expectFactoryCreate + expectHistorianCommand.
+// channels_.factory=false → expectFactoryCreate silently skipped.
+// Only expectHistorianCommand("setSortStrategy") is verified.
+// Same Scenarios::SetStrategy as EngineComponentTest — no modification needed.
+TEST_F(HistorianOnlyTest, SetStrategy) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::SetStrategy(SortStrategyId::Descending));
+}
+
+TEST_F(HistorianOnlyTest, PublishSnapshot) {
+    engine_->addVector({1, 2, 3});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::PublishSnapshot(1));
+}
+
+// Scenarios::FullEngineFlow contains all expectFactory* and expectHistorian* signals.
+// channels_.factory=false → all expectFactoryCreate silently skipped.
+// Verified: expectHistorianCommand x3, expectHistorianSnapshot x1.
+// Same Scenarios::FullEngineFlow as EngineComponentTest — no modification needed.
+TEST_F(HistorianOnlyTest, FullEngineFlow) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::FullEngineFlow());
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FactoryOnlyTest — factory channel only
+// ─────────────────────────────────────────────────────────────────────────────
+// dynamic_cast<HistorianSpy*>(this) → null     → NullHistorian wired
+// dynamic_cast<FactorySpy*>(this)   → non-null → FactorySpy   wired
+// channels_ = { historian: false, factory: true }
+//
+// EngineDriver filters expectations by channels_:
+//   expectFactoryCreate     → VERIFY
+//   expectHistorianCommand  → SKIP  (not "Signal not received")
+//   expectHistorianSnapshot → SKIP
+//
+// The same pre-built Scenarios::* collections work without modification.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class FactoryOnlyTest : public EngineTestBase, public FactorySpy {};
+
+// Scenarios::SetStrategy contains expectFactoryCreate + expectHistorianCommand.
+// channels_.historian=false → expectHistorianCommand silently skipped.
+// Only expectFactoryCreate(Descending) is verified.
+// Same Scenarios::SetStrategy as EngineComponentTest — no modification needed.
+TEST_F(FactoryOnlyTest, SetStrategy) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::SetStrategy(SortStrategyId::Descending));
+}
+
+// Scenarios::FullEngineFlow contains all expectHistorian* and expectFactory* signals.
+// channels_.historian=false → all expectHistorian* silently skipped.
+// Verified: expectFactoryCreate x1 (SetStrategy(Descending) inside FullEngineFlow).
+// The initial create(Ascending) in SetUp() runs with unarmed verifier → ignored.
+// AddVector, SortVector, PublishSnapshot steps have empty expectations after filtering
+// → verifier_.setExpected({}) + verifyComplete() passes trivially.
+// If Engine unexpectedly calls FactorySpy during those steps, verifier fires
+// "Unexpected signal" — empty contract means zero outbound calls expected.
+TEST_F(FactoryOnlyTest, FullEngineFlow) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run(Scenarios::FullEngineFlow());
 }
