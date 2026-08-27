@@ -126,6 +126,57 @@ TEST_F(ScenarioFrameworkTest, SignalFromWrongStep_RegressionRev1) {
     );
 }
 
+// ─── Mode 2 parity tests ──────────────────────────────────────────────────────
+// Verify that ScenarioVerifier Mode 2 (beginStep / matchExpectation / finalizeStep)
+// enforces the same strict contract as Mode 1 (setExpected / report / verifyComplete).
+// These tests call the verifier API directly, without EngineDriver or a real Engine.
+
+// Actual arrives with no matching expectation → finalizeStep reports Unexpected signal.
+TEST_F(ScenarioFrameworkTest, Mode2_UnexpectedSignal) {
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector"));
+    verifier_.endStepCollection();
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.finalizeStep(),
+        "Unexpected signal"
+    );
+}
+
+// No actual arrives but expectation is declared → Signal not received.
+TEST_F(ScenarioFrameworkTest, Mode2_SignalNotReceived) {
+    verifier_.beginStep();
+    // no report() calls — stepActuals_ stays empty
+    verifier_.endStepCollection();
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.matchExpectation(expectHistorianCommand("addVector")),
+        "Signal not received"
+    );
+}
+
+// Two actuals arrive in order A, B. Expectation for B declared first → wrong order.
+TEST_F(ScenarioFrameworkTest, Mode2_WrongOrder) {
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector"));   // actual[0]
+    verifier_.report(historianSnapshot(0));            // actual[1]
+    verifier_.endStepCollection();
+    // Request second actual before first:
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.matchExpectation(expectHistorianSnapshot()),
+        "Unexpected signal"
+    );
+}
+
+// Correct signal name and endpoint but wrong payload data.
+TEST_F(ScenarioFrameworkTest, Mode2_PayloadMismatch) {
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector", {9, 9, 9}));
+    verifier_.endStepCollection();
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.matchExpectation(expectHistorianCommand("addVector", {{1, 2, 3}})),
+        "payload mismatch"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // EngineTestBase
 // ─────────────────────────────────────────────────────────────────────────────
@@ -274,19 +325,79 @@ TEST_F(EngineComponentTest, FullEngineFlow) {
     driver.run(Scenarios::FullEngineFlow());
 }
 
-// Ad-hoc local scenario — no pre-built collection needed.
+// Ad-hoc local scenario — stimulus and expectation in separate run() calls.
+// Demonstrates that run() is a fragment, not a scenario boundary.
 TEST_F(EngineComponentTest, LocalScenario) {
     EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({10, 20, 30}) });
+    driver.run({ expectHistorianCommand("addVector", {{10, 20, 30}}) });
+}
+
+// ─── Cross-run regression tests ───────────────────────────────────────────────
+// Verify that run() is a scenario fragment, not a scenario boundary.
+
+// Actual without expectation until EngineDriver destruction → Unexpected signal.
+TEST_F(EngineComponentTest, SplitRun_ActualWithoutExpectation) {
+    EXPECT_NONFATAL_FAILURE(
+        [&]() {
+            EngineDriver driver(*engine_, verifier_, channels_);
+            driver.run({ receiveVectorAdded({10, 20, 30}) });
+            // No expectation declared — destructor: finalizeStep() → "Unexpected signal"
+        }(),
+        "Unexpected signal"
+    );
+}
+
+// Wrong order: two actuals from one stimulus, expectations declared in reverse.
+// receiveStrategyChange generates in one step:
+//   actual[0]: Factory.create(Descending)
+//   actual[1]: Historian.recordCommand("setSortStrategy")
+// Declaring Historian expectation first → mismatch → Unexpected signal.
+TEST_F(EngineComponentTest, SplitRun_WrongOrder) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveStrategyChange(SortStrategyId::Descending) });
+    EXPECT_NONFATAL_FAILURE(
+        driver.run({
+            expectHistorianCommand("setSortStrategy"),        // expected 2nd, arrives 1st
+            expectFactoryCreate(SortStrategyId::Descending),
+        }),
+        "Unexpected signal"
+    );
+}
+
+// Payload mismatch in split scenario.
+TEST_F(EngineComponentTest, SplitRun_PayloadMismatch) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({10, 20, 30}) });
+    EXPECT_NONFATAL_FAILURE(
+        driver.run({ expectHistorianCommand("addVector", {{99, 99, 99}}) }),
+        "payload mismatch"
+    );
+}
+
+// Multi-step split: each stimulus and expectation in a separate run().
+TEST_F(EngineComponentTest, SplitRun_MultiStep) {
+    engine_->addVector({3, 1, 2});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({3, 1, 2}) });
+    driver.run({ expectHistorianCommand("addVector", {{3, 1, 2}}) });
+    driver.run({ receiveSortRequested(0) });
+    driver.run({ expectHistorianCommand("sortVector") });
+}
+
+// Mixed fragment: expectation closing step A + new stimulus B + expectation B
+// in a single run() call after a prior run() with stimulus A.
+// Verifies that run() boundaries have no semantic role.
+TEST_F(EngineComponentTest, SplitRun_MixedFragment) {
+    engine_->addVector({5, 3, 1});
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({1, 2, 3}) });
     driver.run({
-        receiveVectorAdded({10, 20, 30}),
-      //  expectHistorianCommand("addVector", {{10, 20, 30}}),
-      //   expectHistorianCommand("addVector", {{10, 20, 30}}),
+        expectHistorianCommand("addVector", {{1, 2, 3}}),  // closes step A
+        receiveSortRequested(0),                            // opens step B
+    //    expectHistorianCommand("sortVector"),               // closes step B
     });
-     driver.run({
-      //  receiveVectorAdded({10, 20, 30}),
-        expectHistorianCommand("addVector", {{10, 20, 30}}),
-      //   expectHistorianCommand("addVector", {{10, 20, 30}}),
-    });
+     driver.run({expectHistorianCommand("sortVector"),   });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -341,6 +452,13 @@ TEST_F(HistorianOnlyTest, FullEngineFlow) {
     driver.run(Scenarios::FullEngineFlow());
 }
 
+// Split run in Historian-only fixture: expectFactoryCreate filtered by channels_.
+TEST_F(HistorianOnlyTest, SplitRun_HistorianOnly) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({5, 6, 7}) });
+    driver.run({ expectHistorianCommand("addVector", {{5, 6, 7}}) });
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // FactoryOnlyTest — factory channel only
 // ─────────────────────────────────────────────────────────────────────────────
@@ -370,12 +488,24 @@ TEST_F(FactoryOnlyTest, SetStrategy) {
 // Scenarios::FullEngineFlow contains all expectHistorian* and expectFactory* signals.
 // channels_.historian=false → all expectHistorian* silently skipped.
 // Verified: expectFactoryCreate x1 (SetStrategy(Descending) inside FullEngineFlow).
-// The initial create(Ascending) in SetUp() runs with unarmed verifier → ignored.
-// AddVector, SortVector, PublishSnapshot steps have empty expectations after filtering
-// → verifier_.setExpected({}) + verifyComplete() passes trivially.
-// If Engine unexpectedly calls FactorySpy during those steps, verifier fires
+// The initial create(Ascending) in SetUp() runs before beginStep() → collectingActuals_=false
+// → silently ignored (verifier not collecting yet).
+// AddVector, SortVector, PublishSnapshot steps have empty expectations after filtering.
+// If Engine unexpectedly calls FactorySpy during those steps, finalizeStep() reports
 // "Unexpected signal" — empty contract means zero outbound calls expected.
 TEST_F(FactoryOnlyTest, FullEngineFlow) {
     EngineDriver driver(*engine_, verifier_, channels_);
     driver.run(Scenarios::FullEngineFlow());
+}
+
+// Signal not received: stimulus executes but does not trigger the Factory channel.
+// receiveVectorAdded() does not call ISortStrategyFactory::create().
+// stepActuals_ is empty for Factory → matchExpectation() reports "Signal not received".
+TEST_F(FactoryOnlyTest, SplitRun_SignalNotReceived) {
+    EngineDriver driver(*engine_, verifier_, channels_);
+    driver.run({ receiveVectorAdded({1, 2, 3}) });
+    EXPECT_NONFATAL_FAILURE(
+        driver.run({ expectFactoryCreate(SortStrategyId::Ascending) }),
+        "Signal not received"
+    );
 }

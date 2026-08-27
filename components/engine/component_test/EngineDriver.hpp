@@ -7,25 +7,32 @@
 #include "scenario/ScenarioVerifier.hpp"
 
 // ─── EngineDriver ─────────────────────────────────────────────────────────────
-// Executes a scenario against a live Engine using step-based verification.
+// Executes a scenario against a live Engine using a stateful per-step parser.
 //
-// A "step" is one Stimulus followed by all immediately following Expectations.
-// Verification is scoped per step:
-//   1. verifier_.setExpected(step.expectations)
-//   2. CaptureStdout → stimulus.action(engine_) → GetCapturedStdout
-//   3. SequenceLog::logFlow(stimulus)
-//   4. verifier_.flushDiagramRows()   ← prints Expectation rows outside capture
-//   5. verifier_.verifyComplete()     ← checks for missing signals in this step
+// Multiple run() calls within one TEST form a single continuous signal stream.
+// The boundary between run() calls has no semantic significance.
+//
+// A "step" is one Stimulus and all Expectations that follow it (in any run()).
+// At most one step is open (pending) at any time.
+//
+// Parser rules:
+//   Stimulus encountered:
+//     → finalize previous step (if open): report unmatched actuals as errors
+//     → open new step: beginStep(), execute stimulus, endStepCollection()
+//   Expectation encountered:
+//     → if no step open: Malformed scenario (ADD_FAILURE + return)
+//     → if inactive channel: silently skip (not "Signal not received")
+//     → otherwise: matchExpectation() against current step's actuals (ordered)
+//   ~EngineDriver():
+//     → finalize pending step (if open)
 //
 // Selective verification via ActiveChannels:
-//   When building a step, expectations for inactive endpoints are silently skipped.
-//   They do NOT appear in verifier_.setExpected() and do NOT produce
-//   "Signal not received" failures. This lets the same pre-built scenario work
-//   across different fixture topologies (EngineComponentTest / HistorianOnlyTest /
-//   FactoryOnlyTest) without modification.
+//   Expectations for inactive endpoints are silently skipped and do NOT produce
+//   "Signal not received". The same pre-built Scenarios::* work across all
+//   fixture topologies (EngineComponentTest / HistorianOnlyTest / FactoryOnlyTest).
 //
-// Malformed scenario: an Expectation appearing before any Stimulus is an error —
-// the framework does not silently ignore it (ADD_FAILURE + return).
+// Diagram rows: flushDiagramRows() is called after finalizeStep() and in the
+//   destructor, always outside any CaptureStdout scope.
 
 class EngineDriver {
 public:
@@ -34,21 +41,36 @@ public:
                  ActiveChannels             channels)
         : engine_(engine), verifier_(verifier), channels_(channels) {}
 
-    void run(const std::vector<Signal>& scenario) {
-        struct Step {
-            const Signal*       stimulus;
-            std::vector<Signal> expectations;
-        };
+    ~EngineDriver() {
+        if (stepOpen_) {
+            verifier_.finalizeStep();
+            verifier_.flushDiagramRows();
+        }
+    }
 
-        // Group scenario into steps.
-        // Expectations for inactive channels are silently skipped (not "Signal not received").
-        // An Expectation before the first Stimulus is a framework error.
-        std::vector<Step> steps;
+    void run(const std::vector<Signal>& scenario) {
         for (const auto& sig : scenario) {
+
             if (sig.role == SignalRole::Stimulus) {
-                steps.push_back({&sig, {}});
+                // Finalize previous step before opening the new one.
+                // flushDiagramRows() here is outside any CaptureStdout scope.
+                if (stepOpen_) {
+                    verifier_.finalizeStep();
+                    verifier_.flushDiagramRows();
+                }
+
+                verifier_.beginStep();
+                stepOpen_ = true;
+
+                testing::internal::CaptureStdout();
+                sig.action(engine_);
+                std::string captured = testing::internal::GetCapturedStdout();
+
+                verifier_.endStepCollection();
+                SequenceLog::logFlow(sig.from, sig.to, sig.name, captured);
+
             } else if (sig.role == SignalRole::Expectation) {
-                if (steps.empty()) {
+                if (!stepOpen_) {
                     ADD_FAILURE()
                         << "Malformed scenario:\n"
                         << "  Expectation \"" << sig.name
@@ -57,35 +79,17 @@ public:
                 }
                 // Skip expectations for inactive channels.
                 // They do not participate in the contract for this fixture topology.
-                if (!channels_.isActive(sig.to)) {
-                    continue;
-                }
-                steps.back().expectations.push_back(sig);
+                if (!channels_.isActive(sig.to)) continue;
+
+                verifier_.matchExpectation(sig);
             }
         }
-
-        // Execute each step with isolated verification scope.
-        for (const auto& step : steps) {
-            verifier_.setExpected(step.expectations);
-
-            testing::internal::CaptureStdout();
-            step.stimulus->action(engine_);
-            std::string captured = testing::internal::GetCapturedStdout();
-
-            SequenceLog::logFlow(step.stimulus->from, step.stimulus->to,
-                                 step.stimulus->name, captured);
-
-            // Flush Expectation rows after GetCapturedStdout so they are
-            // not captured and appear at correct position in the diagram.
-            verifier_.flushDiagramRows();
-
-            // Per-step verification: missing signals → ADD_FAILURE here.
-            verifier_.verifyComplete();
-        }
+        // Step remains open across run() calls — finalized by next Stimulus or destructor.
     }
 
 private:
     patterns::engine::Engine& engine_;
     ScenarioVerifier&          verifier_;
     ActiveChannels             channels_;
+    bool                       stepOpen_ = false;
 };

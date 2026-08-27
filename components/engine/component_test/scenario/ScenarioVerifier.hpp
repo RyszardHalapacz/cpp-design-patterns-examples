@@ -9,21 +9,26 @@
 // ─── ScenarioVerifier ─────────────────────────────────────────────────────────
 // Central verification engine for strict, per-step scenario contracts.
 //
-// Lifecycle per Step (one Stimulus + its Expectations):
+// ── Mode 1 — legacy direct API (used by ScenarioFrameworkTest) ───────────────
 //   setExpected(expectations)   — arms verifier for this step; resets all state
-//   report(actual)              — called by spies synchronously during stimulus
+//   report(actual)              — called by spies during stimulus (armed path)
 //   flushDiagramRows()          — called by driver after GetCapturedStdout()
 //   verifyComplete()            — called by driver at end of step; disarms verifier
 //
-// "Strict verification applies exclusively within an active step
-//  (between setExpected and verifyComplete). Collaborator calls that happen
-//  during SetUp or before driver.run() are silently ignored — the verifier
-//  does not guard the component's entire lifetime."
+// ── Mode 2 — stateful per-step collection (used by EngineDriver) ─────────────
+//   beginStep()                 — opens a new step; spies collect into stepActuals_
+//   endStepCollection()         — stops collecting; spies no longer buffer
+//   matchExpectation(exp)       — ordered match of one expectation vs stepActuals_
+//   finalizeStep()              — reports unmatched actuals; closes step
 //
-// Failure semantics:
-//   Unexpected signal   → ADD_FAILURE, confused_=true (prevents cascading)
-//   Wrong payload       → ADD_FAILURE, nextExpected_++ (order still verified)
-//   Signal not received → ADD_FAILURE in verifyComplete() (suppressed if confused)
+//   Mode 2 assumes collaborator calls caused by a Stimulus are synchronous.
+//   A signal arriving after endStepCollection() falls through to Mode 1 logic
+//   (silently ignored when armed_==false), which is safe for the current Engine.
+//
+// Failure semantics (both modes):
+//   Unexpected signal   → ADD_FAILURE, confused flag set (prevents cascading)
+//   Wrong payload       → ADD_FAILURE, matching advances (order still verified)
+//   Signal not received → ADD_FAILURE (suppressed if confused)
 
 class ScenarioVerifier {
 public:
@@ -38,8 +43,13 @@ public:
     }
 
     // Called by spies synchronously during stimulus execution.
-    // Compares actual against next expected signal in this step's sequence.
+    // Mode 2: if collecting, buffers actual into stepActuals_ for deferred matching.
+    // Mode 1: if armed, matches actual against next expected signal immediately.
     void report(const SignalDescriptor& actual) {
+        if (collectingActuals_) {
+            stepActuals_.push_back(actual);
+            return;
+        }
         if (!armed_ || confused_) return;
 
         // No more expected in this step → unexpected call
@@ -112,10 +122,92 @@ public:
         armed_ = false;
     }
 
+    // ── Mode 2 ───────────────────────────────────────────────────────────────
+
+    // Opens a new step: clears per-step state and starts collecting actuals.
+    // Called by EngineDriver before executing a Stimulus.
+    void beginStep() {
+        stepActuals_.clear();
+        nextActualInStep_ = 0;
+        stepConfused_     = false;
+        collectingActuals_ = true;
+    }
+
+    // Stops collecting actuals. Called by EngineDriver after Stimulus execution.
+    void endStepCollection() {
+        collectingActuals_ = false;
+    }
+
+    // Matches one Expectation against the next actual in stepActuals_ (ordered).
+    // Called by EngineDriver for each Expectation signal in the stream.
+    void matchExpectation(const Signal& exp) {
+        if (stepConfused_) return;
+
+        if (nextActualInStep_ >= stepActuals_.size()) {
+            ADD_FAILURE()
+                << "Signal not received:\n"
+                << "  from:   " << endpointName(exp.from) << "\n"
+                << "  to:     " << endpointName(exp.to)   << "\n"
+                << "  signal: " << exp.name;
+            return;
+        }
+
+        const SignalDescriptor& actual = stepActuals_[nextActualInStep_];
+
+        if (actual.from != exp.from || actual.to != exp.to || actual.name != exp.name) {
+            ADD_FAILURE()
+                << "Unexpected signal:\n"
+                << "  received: " << endpointName(actual.from) << " -> "
+                                  << endpointName(actual.to)   << " : " << actual.name << "\n"
+                << "  expected: " << endpointName(exp.from)    << " -> "
+                                  << endpointName(exp.to)      << " : " << exp.name;
+            stepConfused_ = true;
+            ++nextActualInStep_;
+            return;
+        }
+
+        if (exp.payloadMatcher && !exp.payloadMatcher(actual.payload)) {
+            ADD_FAILURE()
+                << "Signal payload mismatch:\n"
+                << "  signal: " << endpointName(actual.from) << " -> "
+                                << endpointName(actual.to)   << " : " << actual.name;
+        }
+
+        pendingRows_.emplace_back(exp.from, exp.to, exp.name);
+        ++nextActualInStep_;
+    }
+
+    // Closes the current step.
+    // Reports any unmatched actuals as "Unexpected signal".
+    // Safe to call from a destructor — uses ADD_FAILURE (no throw).
+    void finalizeStep() {
+        if (!stepConfused_) {
+            for (size_t i = nextActualInStep_; i < stepActuals_.size(); ++i) {
+                const SignalDescriptor& actual = stepActuals_[i];
+                ADD_FAILURE()
+                    << "Unexpected signal:\n"
+                    << "  from:   " << endpointName(actual.from) << "\n"
+                    << "  to:     " << endpointName(actual.to)   << "\n"
+                    << "  signal: " << actual.name;
+            }
+        }
+        stepActuals_.clear();
+        nextActualInStep_  = 0;
+        stepConfused_      = false;
+        collectingActuals_ = false;
+    }
+
 private:
+    // Mode 1 fields
     std::vector<Signal>                                      expectations_;
     size_t                                                   nextExpected_ = 0;
     bool                                                     armed_        = false;
     bool                                                     confused_     = false;
     std::vector<std::tuple<Endpoint, Endpoint, std::string>> pendingRows_;
+
+    // Mode 2 fields
+    std::vector<SignalDescriptor> stepActuals_;
+    size_t                        nextActualInStep_  = 0;
+    bool                          collectingActuals_ = false;
+    bool                          stepConfused_      = false;
 };
