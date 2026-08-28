@@ -19,7 +19,8 @@
 #include "scenario/EngineEndpoint.hpp"
 #include "scenario/Spies.hpp"
 #include "scenario/Scenarios.hpp"
-#include "EngineDriver.hpp"
+#include "scenario/SignalComparator.hpp"
+#include "scenario/SignalMismatchFormatter.hpp"
 
 using namespace patterns::services;
 using namespace patterns::strategy;
@@ -131,7 +132,7 @@ TEST_F(ScenarioFrameworkTest, SignalFromWrongStep_RegressionRev1) {
 // ─── Mode 2 parity tests ──────────────────────────────────────────────────────
 // Verify that ScenarioVerifier Mode 2 (beginStep / matchExpectation / finalizeStep)
 // enforces the same strict contract as Mode 1 (setExpected / report / verifyComplete).
-// These tests call the verifier API directly, without EngineDriver or a real Engine.
+// These tests call the verifier API directly, without a real Engine.
 
 // Actual arrives with no matching expectation → finalizeStep reports Unexpected signal.
 TEST_F(ScenarioFrameworkTest, Mode2_UnexpectedSignal) {
@@ -186,7 +187,7 @@ TEST_F(ScenarioFrameworkTest, Mode2_PayloadMismatch) {
 //
 // SetUp():
 //   Detects active channels via dynamic_cast on the concrete fixture type.
-//   Builds ActiveChannels and stores it in channels_ for use by EngineDriver.
+//   Builds ActiveChannels and stores it in channels_ for ScenarioExecutor.
 //   Wires the spy (if active) or a real/null implementation.
 //
 //   Engine stores collaborators via weak_ptr. To keep control blocks alive,
@@ -354,7 +355,7 @@ TEST_F(EndpointApiTest, MultiStep_StepsAreIsolated)
 
 // Inactive channel: factory.receive() in HistorianOnlyTest is silently skipped.
 // Indirect test — verifies that absence of FactorySpy does not cause "Signal not received".
-// ScenarioExecutor channel filtering (channels_.factory=false) is unchanged from EngineDriver.
+// ScenarioExecutor channel filtering (channels_.factory=false) is controlled by channels_.
 // Direct topology test: see HistorianOnlyTest::SetStrategy below.
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -621,4 +622,404 @@ TEST_F(FactoryOnlyTest, SignalNotReceived) {
         factory.receive(factory.create(SortStrategyId::Ascending)),
         "Signal not received"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SignalComparatorTest — D10
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests compareSignals() and makeUnexpectedExtra() directly.
+// Asserts on structured SignalMismatch fields — no ADD_FAILURE, no string capture.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class SignalComparatorTest : public ::testing::Test {
+protected:
+    static Signal expectCommand(std::string name,
+                                std::optional<std::vector<int>> data = {}) {
+        return expectHistorianCommand(std::move(name), data);
+    }
+    static SignalDescriptor actualCommand(std::string name,
+                                         std::vector<int> data = {}) {
+        return {Endpoint::Engine, Endpoint::Historian, "recordCommand",
+                std::any{CommandHistory{std::move(name), std::move(data)}}};
+    }
+    static SignalDescriptor actualSnapshot(bool running = false,
+                                           SortStrategyId strategy = SortStrategyId::Ascending,
+                                           std::size_t vectorCount = 0) {
+        EngineSnapshot s; s.running=running; s.strategy=strategy; s.vectorCount=vectorCount;
+        return {Endpoint::Engine, Endpoint::Historian, "publishSnapshot", std::any{s}};
+    }
+    static SignalDescriptor actualFactoryCreate(SortStrategyId id) {
+        return {Endpoint::Engine, Endpoint::Factory, "create", std::any{id}};
+    }
+};
+
+// All metadata and payload match → success.
+TEST_F(SignalComparatorTest, Match_AllOk) {
+    auto r = compareSignals(expectCommand("addVector", {{1,2,3}}),
+                            actualCommand("addVector", {1,2,3}));
+    EXPECT_TRUE(r.has_value());
+}
+
+// Wrong 'to' endpoint → MetadataMismatch, one field diff.
+TEST_F(SignalComparatorTest, MetadataMismatch_WrongTo) {
+    Signal exp = expectHistorianCommand("addVector");
+    SignalDescriptor act{Endpoint::Engine, Endpoint::Factory, "recordCommand", {}};
+    auto r = compareSignals(exp, act);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().kind, SignalMismatchKind::MetadataMismatch);
+    ASSERT_EQ(r.error().metadata.size(), 1u);
+    EXPECT_EQ(r.error().metadata[0].path,     "to");
+    EXPECT_EQ(r.error().metadata[0].expected, "Historian");
+    EXPECT_EQ(r.error().metadata[0].actual,   "Factory");
+}
+
+// Wrong 'to' and wrong 'name' → MetadataMismatch, two field diffs.
+TEST_F(SignalComparatorTest, MetadataMismatch_WrongToAndName) {
+    Signal exp = expectHistorianCommand("addVector");
+    SignalDescriptor act{Endpoint::Engine, Endpoint::Factory, "create",
+                         std::any{SortStrategyId::Ascending}};
+    auto r = compareSignals(exp, act);
+    ASSERT_FALSE(r.has_value());
+    ASSERT_EQ(r.error().metadata.size(), 2u);
+    EXPECT_EQ(r.error().metadata[0].path, "to");
+    EXPECT_EQ(r.error().metadata[1].path, "name");
+}
+
+// Wrong commandName → PayloadMismatch, commandName field.
+TEST_F(SignalComparatorTest, PayloadMismatch_WrongCommandName) {
+    auto r = compareSignals(expectCommand("addVector"),
+                            actualCommand("sortVector"));
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().kind, SignalMismatchKind::PayloadMismatch);
+    ASSERT_TRUE(r.error().payload.has_value());
+    ASSERT_EQ(r.error().payload->fields.size(), 1u);
+    EXPECT_EQ(r.error().payload->fields[0].path,     "commandName");
+    EXPECT_EQ(r.error().payload->fields[0].expected, "\"addVector\"");
+    EXPECT_EQ(r.error().payload->fields[0].actual,   "\"sortVector\"");
+}
+
+// commandName wrong + data wrong → two fields reported simultaneously.
+TEST_F(SignalComparatorTest, PayloadMismatch_MultipleFields) {
+    auto r = compareSignals(expectCommand("addVector", {{1,2,3}}),
+                            actualCommand("sortVector", {9,9}));
+    ASSERT_FALSE(r.has_value());
+    const auto& fields = r.error().payload->fields;
+    bool hasCmd = false, hasSize = false;
+    for (const auto& f : fields) {
+        if (f.path == "commandName") hasCmd  = true;
+        if (f.path == "data.size")   hasSize = true;
+    }
+    EXPECT_TRUE(hasCmd);
+    EXPECT_TRUE(hasSize);
+}
+
+// Vector diff: size + element mismatch + <missing>.
+TEST_F(SignalComparatorTest, PayloadMismatch_VectorDiff) {
+    auto r = compareSignals(expectCommand("addVector", {{1,2,3,40}}),
+                            actualCommand("addVector", {1,2,99}));
+    ASSERT_FALSE(r.has_value());
+    const auto& fields = r.error().payload->fields;
+    bool hasSize=false, hasIdx2=false, hasIdx3=false;
+    for (const auto& f : fields) {
+        if (f.path == "data.size") hasSize = true;
+        if (f.path == "data[2]")  hasIdx2 = true;
+        if (f.path == "data[3]") {
+            hasIdx3 = true;
+            EXPECT_EQ(f.expected, "40");
+            EXPECT_EQ(f.actual,   "<missing>");
+        }
+    }
+    EXPECT_TRUE(hasSize); EXPECT_TRUE(hasIdx2); EXPECT_TRUE(hasIdx3);
+}
+
+// Actual vector longer than expected → <missing> on expected side.
+TEST_F(SignalComparatorTest, PayloadMismatch_VectorActualLonger) {
+    auto r = compareSignals(expectCommand("addVector", {{1,2}}),
+                            actualCommand("addVector", {1,2,99}));
+    ASSERT_FALSE(r.has_value());
+    const auto& fields = r.error().payload->fields;
+    bool hasExtra = false;
+    for (const auto& f : fields)
+        if (f.path == "data[2]" && f.expected == "<missing>") hasExtra = true;
+    EXPECT_TRUE(hasExtra);
+}
+
+// Wrong payload type → PayloadMismatch, type names differ.
+// NOTE: metadata (from/to/name) must match; compareSignals() checks metadata first.
+// Using actualSnapshot() would fail on name ("recordCommand" vs "publishSnapshot")
+// → must use matching name with wrong payload type.
+TEST_F(SignalComparatorTest, PayloadMismatch_WrongType) {
+    SignalDescriptor act{Endpoint::Engine, Endpoint::Historian, "recordCommand",
+                         std::any{EngineSnapshot{}}};
+    auto r = compareSignals(expectHistorianCommand("addVector"), act);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().kind, SignalMismatchKind::PayloadMismatch);
+    ASSERT_TRUE(r.error().payload.has_value());
+    const auto& p = r.error().payload.value();
+    EXPECT_NE(p.expectedType, p.actualType);
+    EXPECT_EQ(p.expectedType, "CommandHistory");
+}
+
+// Empty std::any → PayloadMismatch, actualType == "(empty)".
+TEST_F(SignalComparatorTest, PayloadMismatch_EmptyPayload) {
+    SignalDescriptor act{Endpoint::Engine, Endpoint::Historian, "recordCommand", {}};
+    auto r = compareSignals(expectCommand("addVector"), act);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().payload->actualType, "(empty)");
+}
+
+// Don't-care: no data constraint → any data accepted.
+TEST_F(SignalComparatorTest, DontCare_NoDataConstraint) {
+    auto r = compareSignals(expectCommand("addVector"),
+                            actualCommand("addVector", {99,99}));
+    EXPECT_TRUE(r.has_value());
+}
+
+// Null payloadMatcher → any payload accepted.
+TEST_F(SignalComparatorTest, DontCare_NullMatcher) {
+    Signal exp = expectHistorianCommand("recordCommand");
+    exp.payloadMatcher = nullptr;
+    auto r = compareSignals(exp, actualCommand("recordCommand", {1,2,3}));
+    EXPECT_TRUE(r.has_value());
+}
+
+// EngineSnapshot: two fields wrong, running don't-care.
+TEST_F(SignalComparatorTest, PayloadMismatch_SnapshotTwoFields) {
+    ExpectedEngineSnapshot spec;
+    spec.strategy    = SortStrategyId::Descending;
+    spec.vectorCount = 3;
+    Signal exp = expectHistorianSnapshot(spec);
+    auto r = compareSignals(exp,
+        actualSnapshot(true, SortStrategyId::Ascending, 7));
+    ASSERT_FALSE(r.has_value());
+    const auto& fields = r.error().payload->fields;
+    ASSERT_EQ(fields.size(), 2u);
+    EXPECT_EQ(fields[0].path, "strategy");
+    EXPECT_EQ(fields[1].path, "vectorCount");
+    for (const auto& f : fields)
+        EXPECT_NE(f.path, "running");  // don't-care: absent
+}
+
+// SortStrategyId mismatch → symbolic names via sortStrategyIdName().
+TEST_F(SignalComparatorTest, PayloadMismatch_SortStrategyId) {
+    Signal exp = expectFactoryCreate(SortStrategyId::Descending);
+    auto r = compareSignals(exp, actualFactoryCreate(SortStrategyId::Ascending));
+    ASSERT_FALSE(r.has_value());
+    ASSERT_EQ(r.error().payload->fields.size(), 1u);
+    EXPECT_EQ(r.error().payload->fields[0].expected, "Descending");
+    EXPECT_EQ(r.error().payload->fields[0].actual,   "Ascending");
+}
+
+// makeUnexpectedExtra — kind and actual set, expected is nullopt.
+TEST_F(SignalComparatorTest, UnexpectedExtra) {
+    auto m = makeUnexpectedExtra(actualCommand("addVector"));
+    EXPECT_EQ(m.kind, SignalMismatchKind::UnexpectedExtra);
+    EXPECT_FALSE(m.expected.has_value());
+    EXPECT_EQ(m.actual.to, "Historian");
+    EXPECT_EQ(m.actual.name, "recordCommand");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SignalMismatchFormatterTest — D11
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests SignalMismatchFormatter::format() directly.
+// No ADD_FAILURE capture. Uses expectContains / expectAbsent helpers.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class SignalMismatchFormatterTest : public ::testing::Test {
+protected:
+    static void expectContains(const std::string& text, std::string_view sub) {
+        EXPECT_NE(text.find(sub), std::string::npos)
+            << "Expected to find: \"" << sub << "\"\nIn:\n" << text;
+    }
+    static void expectAbsent(const std::string& text, std::string_view sub) {
+        EXPECT_EQ(text.find(sub), std::string::npos)
+            << "Expected NOT to find: \"" << sub << "\"\nIn:\n" << text;
+    }
+};
+
+TEST_F(SignalMismatchFormatterTest, MetadataMismatch_ContainsUnexpectedSignal) {
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::MetadataMismatch,
+        .expected = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .actual   = SignalMeta{"Engine", "Factory",   "create"},
+        .metadata = {{"to",   "Historian", "Factory"},
+                     {"name", "recordCommand", "create"}},
+        .payload  = {}
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectContains(text, "Unexpected signal");
+    expectContains(text, "Expected signal");
+    expectContains(text, "Actual signal");
+    expectContains(text, "field [to]");
+    expectContains(text, "field [name]");
+    expectContains(text, "Historian");
+    expectContains(text, "Factory");
+}
+
+TEST_F(SignalMismatchFormatterTest, PayloadMismatch_ContainsPayloadMismatch) {
+    PayloadMismatch p{"CommandHistory", "CommandHistory",
+        {{"commandName", "\"addVector\"", "\"sortVector\""}}};
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::PayloadMismatch,
+        .expected = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .actual   = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .metadata = {},
+        .payload  = p
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectContains(text, "payload mismatch");
+    expectContains(text, "payload type");
+    expectContains(text, "CommandHistory");
+    expectContains(text, "payload.commandName");
+    expectContains(text, "\"addVector\"");
+    expectContains(text, "\"sortVector\"");
+}
+
+TEST_F(SignalMismatchFormatterTest, PayloadMismatch_VectorIndexedDiff) {
+    PayloadMismatch p{"CommandHistory", "CommandHistory",
+        {{"data.size","4","3"},{"data[2]","3","99"},{"data[3]","40","<missing>"}}};
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::PayloadMismatch,
+        .expected = std::nullopt,
+        .actual   = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .metadata = {},
+        .payload  = p
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectContains(text, "payload.data.size");
+    expectContains(text, "payload.data[2]");
+    expectContains(text, "payload.data[3]");
+    expectContains(text, "<missing>");
+}
+
+TEST_F(SignalMismatchFormatterTest, TypeMismatch_ShowsBothTypes) {
+    PayloadMismatch p{"CommandHistory", "EngineSnapshot", {}};
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::PayloadMismatch,
+        .expected = std::nullopt,
+        .actual   = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .metadata = {},
+        .payload  = p
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectContains(text, "CommandHistory");
+    expectContains(text, "EngineSnapshot");
+    expectContains(text, "payload.type");
+    expectAbsent(text, "payload.commandName");
+}
+
+TEST_F(SignalMismatchFormatterTest, UnexpectedExtra_ContainsUnexpectedSignal) {
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::UnexpectedExtra,
+        .expected = std::nullopt,
+        .actual   = SignalMeta{"Engine", "Historian", "recordCommand"},
+        .metadata = {},
+        .payload  = std::nullopt
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectContains(text, "Unexpected signal");
+    expectContains(text, "(none");
+    expectContains(text, "recordCommand");
+    expectAbsent(text, "Expected signal:\n  from");
+}
+
+TEST_F(SignalMismatchFormatterTest, PayloadMismatch_EmptyFields_NoPayloadLines) {
+    PayloadMismatch p{"EngineSnapshot", "EngineSnapshot", {}};
+    SignalMismatch m{
+        .kind     = SignalMismatchKind::PayloadMismatch,
+        .expected = std::nullopt,
+        .actual   = SignalMeta{"Engine", "Historian", "publishSnapshot"},
+        .metadata = {},
+        .payload  = p
+    };
+    auto text = SignalMismatchFormatter::format(m);
+    expectAbsent(text, "payload.running");
+    expectAbsent(text, "payload.strategy");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ScenarioVerifierTest — D12
+// ─────────────────────────────────────────────────────────────────────────────
+// Integration tests: compareSignals → ScenarioVerifier → formatter → ADD_FAILURE.
+// Only fixture that captures ADD_FAILURE via ScopedFakeTestPartResultReporter.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+class ScenarioVerifierTest : public ::testing::Test {
+protected:
+    ScenarioVerifier verifier_;
+
+    std::string captureFailure(std::function<void()> action) {
+        testing::TestPartResultArray results;
+        {
+            testing::ScopedFakeTestPartResultReporter reporter(
+                testing::ScopedFakeTestPartResultReporter::INTERCEPT_ALL_THREADS,
+                &results);
+            action();
+        }
+        if (results.size() == 0) {
+            ADD_FAILURE() << "Expected a failure but none was reported";
+            return {};
+        }
+        return results.GetTestPartResult(0).message();
+    }
+
+    static void expectContains(const std::string& text, std::string_view sub) {
+        EXPECT_NE(text.find(sub), std::string::npos)
+            << "Expected: \"" << sub << "\"\nIn:\n" << text;
+    }
+
+    static SignalDescriptor historianCommand(std::string name,
+                                             std::vector<int> data = {}) {
+        return {Endpoint::Engine, Endpoint::Historian, "recordCommand",
+                std::any{CommandHistory{std::move(name), std::move(data)}}};
+    }
+    static SignalDescriptor factoryCreate(SortStrategyId id) {
+        return {Endpoint::Engine, Endpoint::Factory, "create", std::any{id}};
+    }
+};
+
+// Mode 1: metadata mismatch → "Unexpected signal" + field diff in ADD_FAILURE.
+TEST_F(ScenarioVerifierTest, Integration_MetadataMismatch_ReportsFields) {
+    verifier_.setExpected({expectHistorianCommand("addVector")});
+    auto msg = captureFailure([&]{
+        verifier_.report(factoryCreate(SortStrategyId::Ascending));
+    });
+    expectContains(msg, "Unexpected signal");
+    expectContains(msg, "field [to]");
+    expectContains(msg, "Historian");
+    expectContains(msg, "Factory");
+}
+
+// Mode 1: payload mismatch → "payload mismatch" + vector element diff.
+TEST_F(ScenarioVerifierTest, Integration_PayloadMismatch_VectorDiff) {
+    verifier_.setExpected({expectHistorianCommand("addVector", {{1,2,3}})});
+    auto msg = captureFailure([&]{
+        verifier_.report(historianCommand("addVector", {1,2,99}));
+    });
+    expectContains(msg, "payload mismatch");
+    expectContains(msg, "data[2]");
+    expectContains(msg, "99");
+}
+
+// Mode 1: unexpected extra → "Unexpected signal" + "(none".
+TEST_F(ScenarioVerifierTest, Integration_UnexpectedExtra) {
+    verifier_.setExpected({});
+    auto msg = captureFailure([&]{
+        verifier_.report(historianCommand("addVector"));
+    });
+    expectContains(msg, "Unexpected signal");
+    expectContains(msg, "(none");
+}
+
+// Mode 2: payload mismatch in matchExpectation → "payload mismatch" + field diff.
+TEST_F(ScenarioVerifierTest, Integration_Mode2_PayloadDiff) {
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector", {9,9,9}));
+    verifier_.endStepCollection();
+    auto msg = captureFailure([&]{
+        verifier_.matchExpectation(expectHistorianCommand("addVector", {{1,2,3}}));
+    });
+    expectContains(msg, "payload mismatch");
+    expectContains(msg, "data[0]");
 }

@@ -1,18 +1,19 @@
-# PROPOSAL: Structured Signal & Payload Mismatch Diagnostics (v3)
+# PROPOSAL: Structured Signal & Payload Mismatch Diagnostics (v4)
 
-> v3 delta from previous draft: unified Expected / Actual / Mismatches output model;
-> `SignalMeta` struct replaces flat label strings in `SignalMismatch`; `finalizeStep()`
-> updated to use formatter; `SignalMismatchFormatter` uses private helpers for each
-> section; `expectHistorianSnapshot` / `historian.publishSnapshot` gain full
-> `ExpectedEngineSnapshot` overload; `Scenarios.hpp` gains `ExpectedEngineSnapshot`
-> overload for `expectHistorianSnapshot`; dependency graph re-verified against actual
-> repo file list; test plan GMock-free throughout; `CMakeLists.txt` unchanged.
+> v4 delta from v3: single public frontend enforced — `EngineDriver.hpp` removed
+> (zero instantiations in any test body); `Scenarios::*` namespace and all 4 stimulus
+> builders removed from `Scenarios.hpp` (no usages found); `expectHistorianCommand` /
+> `expectHistorianSnapshot` / `expectFactoryCreate` kept as internal verifier helpers
+> (used by `ScenarioFrameworkTest`); new §2 "Legacy Frontend Analysis" with exact
+> call-site list; D0 (legacy removal) added before D1 in implementation order;
+> acceptance criteria and backward-compat table updated; new §20 "Legacy Removal
+> Verification Checklist" appended.
 
 ---
 
 ## 1. Scope
 
-Two distinct diagnostic gaps:
+Three diagnostic gaps:
 
 **Gap A — metadata mismatch (wrong from / to / name):**
 ```
@@ -79,14 +80,90 @@ Mismatches:
     actual:   <missing>
 ```
 
+**Gap C — Legacy frontend consolidation:**
+
+`EngineDriver` and the `Scenarios::*` namespace represent a second public interface
+for writing component tests. Only one public DSL may remain. See §2 for the analysis
+and migration plan.
+
 **Primary constraint:** the public component test DSL does not change. No new types
 appear in normal `TEST_F` bodies. All diagnostics happen automatically.
 
 ---
 
-## 2. Public Test API — Unchanged
+## 2. Legacy Frontend Analysis
 
-This is the public DSL. It must remain exactly as it is today.
+### 2.1 `EngineDriver.hpp`
+
+Searched all source and header files for any usage of `EngineDriver`.
+
+**Result — zero instantiations in test bodies:**
+
+| File | Line | Content |
+|---|---|---|
+| `EngineComponentTest.cpp` | 22 | `#include "EngineDriver.hpp"` — only include, no instantiation |
+| `EngineComponentTest.cpp` | 134 | comment: `"without EngineDriver or a real Engine"` |
+| `EngineComponentTest.cpp` | 189 | comment: `"for use by EngineDriver"` |
+| `EngineComponentTest.cpp` | 357 | comment: `"unchanged from EngineDriver"` |
+
+No test body contains `EngineDriver driver(...)` or `driver.run(...)`.
+
+**Decision: remove.** Delete `EngineDriver.hpp`. Remove `#include "EngineDriver.hpp"` from `EngineComponentTest.cpp`.
+
+### 2.2 `Scenarios.hpp` — free-function expectation builders
+
+Searched all test files for `expectHistorianCommand`, `expectHistorianSnapshot`, `expectFactoryCreate`.
+
+**Result — used in `ScenarioFrameworkTest`:**
+
+| Function | Lines in `EngineComponentTest.cpp` |
+|---|---|
+| `expectHistorianCommand` | 82, 94, 95, 105, 119, 153, 166, 177, and in proposed `SignalComparatorTest` / `ScenarioVerifierTest` |
+| `expectHistorianSnapshot` | 95, 166, and in proposed `SignalComparatorTest` |
+| `expectFactoryCreate` | in proposed `SignalComparatorTest` |
+
+These are called via `verifier_.setExpected({...})` and `verifier_.matchExpectation(...)` — they test the `ScenarioVerifier` framework in isolation, not the public scenario DSL. They are internal test infrastructure, not a public API.
+
+**Decision: keep as internal helpers.** Update them to return `PayloadMatchResult` (D9). They remain in `Scenarios.hpp` (stripped); they do NOT appear in the public API section (§3).
+
+### 2.3 `Scenarios.hpp` — `Scenarios::*` namespace and stimulus builders
+
+Searched for `Scenarios::`, `receiveVectorAdded`, `receiveSortRequested`, `receiveStrategyChange`, `receivePublishSnapshot`.
+
+**Result — zero usages anywhere in the codebase.**
+
+| Symbol | Usages |
+|---|---|
+| `Scenarios::AddVector` | 0 |
+| `Scenarios::SortVector` | 0 |
+| `Scenarios::SetStrategy` | 0 |
+| `Scenarios::PublishSnapshot` | 0 |
+| `Scenarios::FullEngineFlow` | 0 |
+| `receiveVectorAdded` | 0 |
+| `receiveSortRequested` | 0 |
+| `receiveStrategyChange` | 0 |
+| `receivePublishSnapshot` | 0 |
+
+**Decision: remove.** Delete the entire `namespace Scenarios { ... }` block and all 4 stimulus builder functions from `Scenarios.hpp`.
+
+After removal, `Scenarios.hpp` contains only the 3 expectation builders listed in §2.2.
+
+### 2.4 Net result of D0
+
+After D0 (`EngineDriver.hpp` deleted, `Scenarios::*` removed):
+
+- `EngineComponentTest.cpp` compiles without `#include "EngineDriver.hpp"` — verified:
+  no compile-time dependency on `EngineDriver` type.
+- `Scenarios.hpp` shrinks from 207 to ~60 lines (3 expectation builders + updated includes).
+- `ScenarioFrameworkTest` calls `expectHistorianCommand` etc. — still compiles, no test bodies change.
+- All existing test cases pass — no behaviour change.
+
+---
+
+## 3. Public Test API — Single Endpoint DSL
+
+This is the only public DSL. It must remain exactly as it is today.
+`EngineDriver` and `Scenarios::*` are removed (see §2).
 
 ```cpp
 // AddVector
@@ -114,16 +191,6 @@ historian.receive(historian.publishSnapshot({
 }));
 ```
 
-Pre-built scenario API (used via `EngineDriver`):
-
-```cpp
-EngineDriver driver(*engine_, verifier_, channels_);
-driver.run(Scenarios::AddVector({1, 2, 3}));
-driver.run(Scenarios::SetStrategy(SortStrategyId::Descending));
-driver.run(Scenarios::PublishSnapshot(1));
-driver.run(Scenarios::FullEngineFlow());
-```
-
 A test author:
 - Does **not** call `compareSignals()`
 - Does **not** inspect `std::expected` or `SignalMismatch`
@@ -136,7 +203,7 @@ All structured diagnostics happen automatically inside `historian.receive()` and
 
 ---
 
-## 3. What Remains Internal
+## 4. What Remains Internal
 
 These types and functions **never appear in a normal `TEST_F` body**:
 
@@ -162,7 +229,7 @@ They appear only in new infrastructure headers and in the new test fixtures
 
 ---
 
-## 4. Internal Architecture
+## 5. Internal Architecture
 
 ```
 PUBLIC TEST
@@ -215,9 +282,9 @@ FRAMEWORK INTERNALS — never visible in normal TEST_F bodies
 
 ---
 
-## 5. New Types
+## 6. New Types
 
-### 5.1 File: `scenario/PayloadMismatch.hpp` (new)
+### 6.1 File: `scenario/PayloadMismatch.hpp` (new)
 
 Generic diagnostic types — **no domain headers**.
 
@@ -225,12 +292,16 @@ Generic diagnostic types — **no domain headers**.
 #pragma once
 #include <algorithm>    // std::min
 #include <any>
-#include <cstdlib>      // free()
-#include <cxxabi.h>     // abi::__cxa_demangle
+#include <cstddef>      // std::size_t
+#include <cstdlib>      // std::free()
 #include <expected>
 #include <string>
 #include <string_view>
+#include <utility>      // std::move
 #include <vector>
+#if defined(__GNUC__) || defined(__clang__)
+#include <cxxabi.h>
+#endif
 
 // ─── FieldMismatch ────────────────────────────────────────────────────────────
 // One mismatching field inside a payload struct.
@@ -291,7 +362,7 @@ inline std::string anyTypeName(const std::any& a)
     int   status    = 0;
     char* demangled = abi::__cxa_demangle(a.type().name(), nullptr, nullptr, &status);
     if (status == 0 && demangled) {
-        std::string name(demangled); free(demangled); return name;
+        std::string name(demangled); std::free(demangled); return name;
     }
 #endif
     return a.type().name();
@@ -351,7 +422,7 @@ inline std::vector<FieldMismatch> diffVector(std::string_view            path,
 
 ---
 
-### 5.2 File: `scenario/SignalMismatch.hpp` (new)
+### 6.2 File: `scenario/SignalMismatch.hpp` (new)
 
 Top-level mismatch model. Depends only on `PayloadMismatch.hpp`.
 
@@ -410,7 +481,7 @@ struct SignalMismatch {
 
 ---
 
-### 5.3 File: `scenario/ExpectationSpecs.hpp` (new)
+### 6.3 File: `scenario/ExpectationSpecs.hpp` (new)
 
 Domain-level partial expectation descriptor. Depends only on `SortStrategyId.hpp`.
 Placed in a separate header so `MatcherHelpers.hpp` can use `ExpectedEngineSnapshot`
@@ -446,7 +517,7 @@ struct ExpectedEngineSnapshot {
 
 ---
 
-### 5.4 File: `scenario/MatcherHelpers.hpp` (new)
+### 6.4 File: `scenario/MatcherHelpers.hpp` (new)
 
 Domain matching logic — the **only** place in the scenario layer that includes
 `IHistorian.hpp` and knows about `CommandHistory` / `EngineSnapshot` fields.
@@ -459,6 +530,7 @@ is added without updating it.
 #include <any>
 #include <optional>
 #include <string>
+#include <utility>      // std::move
 #include <vector>
 #include "PayloadMismatch.hpp"
 #include "ExpectationSpecs.hpp"
@@ -548,7 +620,7 @@ inline PayloadMatchResult matchSortStrategyId(
 
 ---
 
-### 5.5 File: `scenario/SignalComparator.hpp` (new)
+### 6.5 File: `scenario/SignalComparator.hpp` (new)
 
 Pure comparison function — no `ADD_FAILURE`, no GoogleTest dependency.
 Directly testable in `SignalComparatorTest` without any failure capture.
@@ -557,6 +629,8 @@ Uses `endpointName()` from `Signal.hpp` to pre-format `SignalMeta` strings.
 ```cpp
 #pragma once
 #include <expected>
+#include <utility>            // std::move
+#include <vector>             // std::vector<SignalFieldMismatch>
 #include "Signal.hpp"         // Signal, SignalDescriptor, Endpoint, endpointName
 #include "SignalMismatch.hpp" // SignalMismatch, SignalMeta, SignalMismatchKind
 
@@ -634,7 +708,7 @@ inline SignalMismatch makeUnexpectedExtra(const SignalDescriptor& actual)
 
 ---
 
-### 5.6 File: `scenario/SignalMismatchFormatter.hpp` (new)
+### 6.6 File: `scenario/SignalMismatchFormatter.hpp` (new)
 
 Pure formatting — no domain types, no GoogleTest dependency.
 `SignalMismatch.hpp` is the only project header included.
@@ -836,7 +910,7 @@ private:
 
 ---
 
-## 6. `scenario/Signal.hpp` — Modified
+## 7. `scenario/Signal.hpp` — Modified
 
 Two changes only:
 
@@ -857,9 +931,9 @@ All existing call sites check `if (expected.payloadMatcher)` — `std::function`
 
 ---
 
-## 7. `scenario/ScenarioVerifier.hpp` — Modified
+## 8. `scenario/ScenarioVerifier.hpp` — Modified
 
-### 7.1 New includes
+### 8.1 New includes
 
 ```cpp
 #include "SignalComparator.hpp"         // compareSignals(), makeUnexpectedExtra()
@@ -869,7 +943,7 @@ All existing call sites check `if (expected.payloadMatcher)` — `std::function`
 `ScenarioVerifier` has **no domain headers** after this change. It sees only
 `Signal`, `SignalDescriptor`, `SignalComparator`, and `SignalMismatchFormatter`.
 
-### 7.2 Mode 1 `report()` — replace both mismatch blocks
+### 8.2 Mode 1 `report()` — replace both mismatch blocks
 
 ```cpp
 void report(const SignalDescriptor& actual) {
@@ -900,7 +974,7 @@ void report(const SignalDescriptor& actual) {
 }
 ```
 
-### 7.3 Mode 2 `matchExpectation()` — replace both mismatch blocks
+### 8.3 Mode 2 `matchExpectation()` — replace both mismatch blocks
 
 ```cpp
 void matchExpectation(const Signal& exp) {
@@ -933,7 +1007,7 @@ void matchExpectation(const Signal& exp) {
 }
 ```
 
-### 7.4 `finalizeStep()` — replace inline "Unexpected signal" block
+### 8.4 `finalizeStep()` — replace inline "Unexpected signal" block
 
 ```cpp
 void finalizeStep() {
@@ -949,30 +1023,64 @@ void finalizeStep() {
 }
 ```
 
-### 7.5 Unchanged methods
+### 8.5 Unchanged methods
 
 `setExpected()`, `beginStep()`, `endStepCollection()`, `verifyComplete()`,
 `flushDiagramRows()` — unchanged. `verifyComplete()` still produces "Signal not
 received" inline; this message is not routed through the formatter.
 
+### 8.6 Non-goal / future extension: `SignalNotReceived`
+
+Unifying "Signal not received" into the Expected / Actual / Mismatches model is
+**explicitly out of scope for this phase**.
+
+Current output (unchanged):
+```
+Signal not received:
+  from:   Engine
+  to:     Historian
+  signal: recordCommand
+```
+
+Future extension could produce:
+```
+Signal not received
+
+Expected signal:
+  from: Engine
+  to:   Historian
+  name: recordCommand
+
+Actual signal:
+  (none)
+
+Mismatches:
+  signal not received
+```
+
+This would require a new `SignalMismatchKind::NotReceived` and formatter path.
+It is a natural follow-up but must not expand the scope of the current implementation.
+
 ---
 
-## 8. `scenario/HistorianEndpoint.hpp` — Modified
+## 9. `scenario/HistorianEndpoint.hpp` — Modified
 
 Replace old inner-lambda approach with delegation to `detail::` helpers.
 Add full `ExpectedEngineSnapshot` overload for `publishSnapshot`.
 
-### 8.1 New includes
+### 9.1 Updated includes
 
 ```cpp
-#include "MatcherHelpers.hpp"   // detail::matchCommandHistory, matchEngineSnapshot
-#include "ExpectationSpecs.hpp" // ExpectedEngineSnapshot
+#include "patterns/historian/IHistorian.hpp"  // CommandHistory, EngineSnapshot — used directly
+#include "MatcherHelpers.hpp"                  // detail::matchCommandHistory, matchEngineSnapshot
+#include "ExpectationSpecs.hpp"               // ExpectedEngineSnapshot
 ```
 
-Remove the old `#include "patterns/historian/IHistorian.hpp"` — now pulled in
-transitively via `MatcherHelpers.hpp`.
+`IHistorian.hpp` stays as a **direct** include — `HistorianEndpoint` uses
+`CommandHistory` and `EngineSnapshot` types directly in its interface. Do not rely on
+transitive inclusion via `MatcherHelpers.hpp`.
 
-### 8.2 New `makeRecordCommand` and public command methods
+### 9.2 New `makeRecordCommand` and public command methods
 
 ```cpp
 // Internal helper: builds a recordCommand expectation signal.
@@ -999,7 +1107,7 @@ Signal makeRecordCommand(const std::string&              commandName,
 [[nodiscard]] Signal setSortStrategy()  const { return makeRecordCommand("setSortStrategy");  }
 ```
 
-### 8.3 `publishSnapshot()` overloads
+### 9.3 `publishSnapshot()` overloads
 
 ```cpp
 // Primary overload: full partial expectation.
@@ -1031,7 +1139,7 @@ Overload resolution:
 
 ---
 
-## 9. `scenario/FactoryEndpoint.hpp` — Modified
+## 10. `scenario/FactoryEndpoint.hpp` — Modified
 
 ```cpp
 #include "MatcherHelpers.hpp"
@@ -1050,25 +1158,52 @@ Overload resolution:
 }
 ```
 
-Remove old `#include "patterns/strategy/SortStrategyId.hpp"` — pulled in via
-`MatcherHelpers.hpp` → `ExpectationSpecs.hpp` → `SortStrategyId.hpp`.
+`SortStrategyId.hpp` stays as a **direct** include — `FactoryEndpoint` uses
+`SortStrategyId` directly in its interface. Do not rely on transitive inclusion
+via `MatcherHelpers.hpp`.
 
 ---
 
-## 10. `scenario/Scenarios.hpp` — Modified
+## 11. `scenario/Scenarios.hpp` — Partially Removed and Modified
 
-All three expectation builders delegate to `detail::` helpers and return
-`PayloadMatchResult`. `expectHistorianSnapshot` gains an `ExpectedEngineSnapshot`
-overload while keeping backward-compatible `std::optional<size_t>` overload.
+**Removed (no usages found):**
+- All 4 stimulus builders: `receiveVectorAdded`, `receiveSortRequested`,
+  `receiveStrategyChange`, `receivePublishSnapshot`
+- Entire `namespace Scenarios { ... }` block (5 functions)
+- Includes no longer needed: `<iterator>`, `patterns/engine/Engine.hpp`,
+  `patterns/observer/SessionEvent.hpp`
 
-### 10.1 New includes (in addition to existing)
+**Kept and updated:** 3 internal expectation builder functions used by `ScenarioFrameworkTest`.
+These are framework internals, not public API. They do NOT appear in normal `TEST_F` bodies.
 
+### 11.1 Updated includes
+
+Before (8 includes):
 ```cpp
+#include <iterator>
+#include <optional>
+#include <utility>
+#include <vector>
+#include "patterns/engine/Engine.hpp"
+#include "patterns/historian/IHistorian.hpp"
+#include "patterns/observer/SessionEvent.hpp"
+#include "patterns/strategy/SortStrategyId.hpp"
+#include "Signal.hpp"
+```
+
+After (6 includes):
+```cpp
+#include <optional>
+#include <utility>
+#include <vector>
+#include "patterns/historian/IHistorian.hpp"
+#include "patterns/strategy/SortStrategyId.hpp"
+#include "Signal.hpp"
 #include "MatcherHelpers.hpp"    // detail::match*
 #include "ExpectationSpecs.hpp"  // ExpectedEngineSnapshot
 ```
 
-### 10.2 Updated `expectHistorianCommand`
+### 11.2 Updated `expectHistorianCommand`
 
 ```cpp
 inline Signal expectHistorianCommand(
@@ -1089,7 +1224,7 @@ inline Signal expectHistorianCommand(
 }
 ```
 
-### 10.3 Updated `expectHistorianSnapshot` (two overloads)
+### 11.3 Updated `expectHistorianSnapshot` (two overloads)
 
 ```cpp
 // Primary overload: full partial expectation.
@@ -1108,18 +1243,15 @@ inline Signal expectHistorianSnapshot(ExpectedEngineSnapshot spec = {})
 }
 
 // Convenience overload: vectorCount-only check.
-// Preserves: expectHistorianSnapshot(std::nullopt) and Scenarios::PublishSnapshot(vc).
+// Preserves existing call sites: expectHistorianSnapshot(std::nullopt)
+// and expectHistorianSnapshot(3).
 inline Signal expectHistorianSnapshot(std::optional<std::size_t> vectorCount)
 {
     return expectHistorianSnapshot(ExpectedEngineSnapshot{ .vectorCount = vectorCount });
 }
 ```
 
-Existing `Scenarios::PublishSnapshot(std::optional<size_t> vectorCount)` calls
-`expectHistorianSnapshot(vectorCount)` → `std::optional<size_t>` overload → backward
-compatible. ✓
-
-### 10.4 Updated `expectFactoryCreate`
+### 11.4 Updated `expectFactoryCreate`
 
 ```cpp
 inline Signal expectFactoryCreate(patterns::strategy::SortStrategyId id) {
@@ -1136,9 +1268,21 @@ inline Signal expectFactoryCreate(patterns::strategy::SortStrategyId id) {
 }
 ```
 
+### 11.5 Net size after D0 + D9
+
+`Scenarios.hpp` shrinks from 207 lines to ~65 lines.
+`namespace Scenarios` and all stimulus builders are gone.
+The 3 expectation builders are the complete content of the file.
+
+**Non-goal for this phase — rename:** After D0 the name `Scenarios.hpp` no longer
+reflects its content (no `Scenarios::*` remain). A more precise name would be
+`ExpectationBuilders.hpp` or `VerifierExpectations.hpp`. This rename is explicitly
+**out of scope** for the current implementation to keep the diff small. It can be a
+follow-up cleanup commit.
+
 ---
 
-## 11. Dependency Graph
+## 12. Dependency Graph
 
 ```
 stdlib / cxxabi.h
@@ -1195,9 +1339,9 @@ SignalMismatchFormatter.hpp (SignalMismatch.hpp only)
 
 ---
 
-## 12. Formatter Output Examples
+## 13. Formatter Output Examples
 
-### 12.1 Metadata mismatch — wrong `to` and `name`
+### 13.1 Metadata mismatch — wrong `to` and `name`
 
 ```
 Unexpected signal
@@ -1223,7 +1367,7 @@ Mismatches:
 
 Substring `"Unexpected signal"` present — existing tests pass. ✓
 
-### 12.2 Payload mismatch — commandName + vector diff
+### 13.2 Payload mismatch — commandName + vector diff
 
 ```
 Signal payload mismatch
@@ -1257,7 +1401,7 @@ Mismatches:
 
 Substring `"payload mismatch"` present — existing tests pass. ✓
 
-### 12.3 Payload type mismatch
+### 13.3 Payload type mismatch
 
 ```
 Signal payload mismatch
@@ -1283,7 +1427,7 @@ Mismatches:
 `anyTypeName()` demangles the actual type. Expected type is always the logical name
 because the matcher knows it (`"CommandHistory"` string literal). ✓
 
-### 12.4 Unexpected extra signal
+### 13.4 Unexpected extra signal
 
 ```
 Unexpected signal
@@ -1299,7 +1443,7 @@ Actual signal:
 
 Substring `"Unexpected signal"` present — existing tests pass. ✓
 
-### 12.5 EngineSnapshot — partial spec, two fields wrong
+### 13.5 EngineSnapshot — partial spec, two fields wrong
 
 ```
 Signal payload mismatch
@@ -1329,18 +1473,24 @@ Mismatches:
 
 ---
 
-## 13. File Summary
+## 14. File Summary
 
 ### New files (`scenario/`)
 
 | File | Role | Dependencies |
 |---|---|---|
-| `PayloadMismatch.hpp` | Generic diff types, `diffVector`, helpers | stdlib, `<cxxabi.h>` |
+| `PayloadMismatch.hpp` | Generic diff types, `diffVector`, helpers | stdlib, `<cxxabi.h>` (guarded) |
 | `SignalMismatch.hpp` | `SignalMeta`, top-level mismatch model, `SignalMismatchKind` | `PayloadMismatch.hpp` |
 | `ExpectationSpecs.hpp` | `ExpectedEngineSnapshot` | `SortStrategyId.hpp` |
 | `MatcherHelpers.hpp` | `detail::match*` — only place with domain knowledge | `PayloadMismatch.hpp`, `ExpectationSpecs.hpp`, `IHistorian.hpp`, `SortStrategyId.hpp` |
 | `SignalComparator.hpp` | `compareSignals()`, `makeUnexpectedExtra()` | `Signal.hpp`, `SignalMismatch.hpp` |
 | `SignalMismatchFormatter.hpp` | `format(SignalMismatch)` → `std::string` | `SignalMismatch.hpp` |
+
+### Removed files
+
+| File | Reason |
+|---|---|
+| `EngineDriver.hpp` | Zero instantiations in any test body (see §2.1); `#include "EngineDriver.hpp"` also removed from `EngineComponentTest.cpp` |
 
 ### Modified files
 
@@ -1350,17 +1500,40 @@ Mismatches:
 | `ScenarioVerifier.hpp` | Include `SignalComparator.hpp`, `SignalMismatchFormatter.hpp`; replace mismatch blocks in `report()`, `matchExpectation()`, `finalizeStep()` |
 | `HistorianEndpoint.hpp` | `makeRecordCommand` delegates to `detail::matchCommandHistory`; `publishSnapshot` gains `ExpectedEngineSnapshot` overload |
 | `FactoryEndpoint.hpp` | `create()` delegates to `detail::matchSortStrategyId` |
-| `Scenarios.hpp` | 3 expectation builders via `detail::` helpers; `expectHistorianSnapshot` gains `ExpectedEngineSnapshot` overload |
+| `Scenarios.hpp` | **D0:** Remove `Scenarios::*` namespace and 4 stimulus builders; remove 3 stale includes. **D9:** 3 remaining expectation builders updated to use `detail::` helpers and `PayloadMatchResult`; `expectHistorianSnapshot` gains `ExpectedEngineSnapshot` overload |
+
+### Modified — infrastructure only
+
+| File | Change |
+|---|---|
+| `EngineComponentTest.cpp` | **D0:** Remove `#include "EngineDriver.hpp"`; update 3 stale comments referencing `EngineDriver` (lines 134, 189, 357) — comment text only, no logic change. **D10–D12:** New test fixtures added: `SignalComparatorTest`, `SignalMismatchFormatterTest`, `ScenarioVerifierTest`. **Existing test behavior and test statements (`EngineComponentTest`, `HistorianOnlyTest`, `FactoryOnlyTest`, `EndpointApiTest`, `ScenarioFrameworkTest`) remain unchanged; only stale comments referring to `EngineDriver` are updated.** |
 
 ### Not modified
 
-`EngineDriver.hpp`, `ScenarioExecutor.hpp`, `ScenarioExecutor.hpp`,
-`SequenceLog.hpp`, `Spies.hpp`, `EngineEndpoint.hpp`,
-`EngineComponentTest.cpp` (component tests), `CMakeLists.txt`.
+`ScenarioExecutor.hpp`, `SequenceLog.hpp`, `Spies.hpp`,
+`EngineEndpoint.hpp`, `CMakeLists.txt`.
 
 ---
 
-## 14. Implementation Order
+## 15. Implementation Order
+
+### D0 — Legacy frontend removal
+
+**Prerequisite: do this before any other change — the rest of D1–D13 builds on a clean baseline.**
+
+1. Delete `EngineDriver.hpp`.
+2. Remove `#include "EngineDriver.hpp"` from `EngineComponentTest.cpp` (line 22).
+3. Update 3 stale comments in `EngineComponentTest.cpp` that mention `EngineDriver`
+   (lines 134, 189, 357) — replace with neutral wording that does not reference the
+   removed type. This is a comment-only change; no test logic is altered.
+4. In `Scenarios.hpp`: delete 4 stimulus builders (`receiveVectorAdded`, `receiveSortRequested`,
+   `receiveStrategyChange`, `receivePublishSnapshot`) and the entire `namespace Scenarios { ... }` block.
+   Remove includes no longer needed: `<iterator>`, `patterns/engine/Engine.hpp`,
+   `patterns/observer/SessionEvent.hpp`.
+
+Build gate: `cmake --build` green; all existing tests pass. No change in test behaviour.
+
+---
 
 ### D1 — `PayloadMismatch.hpp`
 
@@ -1410,8 +1583,9 @@ blocks (`report()`, `matchExpectation()`, `finalizeStep()`).
 - `HistorianEndpoint.hpp` — add `MatcherHelpers.hpp` / `ExpectationSpecs.hpp` includes;
   new `makeRecordCommand`; two `publishSnapshot` overloads.
 - `FactoryEndpoint.hpp` — add `MatcherHelpers.hpp` include; update `create()`.
-- `Scenarios.hpp` — add `MatcherHelpers.hpp` / `ExpectationSpecs.hpp` includes;
-  update three expectation builders; add `expectHistorianSnapshot(ExpectedEngineSnapshot)`.
+- `Scenarios.hpp` — add `MatcherHelpers.hpp` / `ExpectationSpecs.hpp` includes (D0
+  already stripped the file to 3 expectation builders); update all 3 builders;
+  add `expectHistorianSnapshot(ExpectedEngineSnapshot)`.
 
 D9 completes the migration.
 
@@ -1419,19 +1593,19 @@ Build gate: `cmake --build` green; all existing tests pass.
 
 ### D10 — `SignalComparatorTest` (new fixture in `EngineComponentTest.cpp`)
 
-Tests added to `EngineComponentTest.cpp` (no CMakeLists change needed). See §15.A.
+Tests added to `EngineComponentTest.cpp` (no CMakeLists change needed). See §16.A.
 
 Build gate: new tests compile and pass.
 
 ### D11 — `SignalMismatchFormatterTest` (new fixture)
 
-See §15.B.
+See §16.B.
 
 Build gate: new tests compile and pass.
 
 ### D12 — `ScenarioVerifierTest` — integration tests (new fixture)
 
-See §15.C. Uses `ScopedFakeTestPartResultReporter` from `<gtest/gtest-spi.h>`
+See §16.C. Uses `ScopedFakeTestPartResultReporter` from `<gtest/gtest-spi.h>`
 (already included in `EngineComponentTest.cpp`).
 
 Build gate: all tests pass.
@@ -1442,7 +1616,7 @@ Update inline comments in modified files to reflect new types. No code changes.
 
 ---
 
-## 15. Test Plan
+## 16. Test Plan
 
 Three new test fixture classes added to `EngineComponentTest.cpp`. No new source files —
 no CMakeLists change. No GoogleMock — `CMakeLists.txt` links only `GTest::gtest_main`
@@ -1568,10 +1742,15 @@ TEST_F(SignalComparatorTest, PayloadMismatch_VectorActualLonger) {
 }
 
 // Wrong payload type → PayloadMismatch, type names differ.
+// NOTE: metadata (from/to/name) must match; compareSignals() checks metadata first.
+// Using actualSnapshot() would fail on name mismatch ("recordCommand" vs "publishSnapshot")
+// and never reach payload comparison → must use matching name with wrong payload type.
 TEST_F(SignalComparatorTest, PayloadMismatch_WrongType) {
-    Signal exp = expectHistorianCommand("addVector");
-    auto r = compareSignals(exp, actualSnapshot());
+    SignalDescriptor act{Endpoint::Engine, Endpoint::Historian, "recordCommand",
+                         std::any{EngineSnapshot{}}};
+    auto r = compareSignals(expectHistorianCommand("addVector"), act);
     ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error().kind, SignalMismatchKind::PayloadMismatch);
     ASSERT_TRUE(r.error().payload.has_value());
     const auto& p = r.error().payload.value();
     EXPECT_NE(p.expectedType, p.actualType);
@@ -1842,15 +2021,15 @@ TEST_F(ScenarioVerifierTest, Integration_Mode2_PayloadDiff) {
 
 Their `EXPECT_NONFATAL_FAILURE` assertions check for `"Unexpected signal"`,
 `"payload mismatch"`, and `"Signal not received"`. The new formatter output preserves
-all three substrings. All existing tests pass after D9.
+all three substrings. All existing tests pass after D0 and after D9.
 
 ---
 
-## 16. Backward Compatibility
+## 17. Backward Compatibility
 
 | Concern | Resolution |
 |---|---|
-| `payloadMatcher` type change | Compiler error at all old lambda sites; D6–D9 atomic commit fixes all |
+| `payloadMatcher` type change | Compiler error at all old lambda sites; D0+D6–D9 atomic commit fixes all |
 | `"Unexpected signal"` substring | Preserved: `formatMetadata()` and `formatExtra()` both start with `"Unexpected signal"` |
 | `"payload mismatch"` substring | Preserved: `formatPayload()` starts with `"Signal payload mismatch"` |
 | `"Signal not received"` | Unchanged — produced by `ScenarioVerifier` directly, not the formatter |
@@ -1859,69 +2038,75 @@ all three substrings. All existing tests pass after D9.
 | `historian.publishSnapshot()` no-arg | Calls `publishSnapshot(ExpectedEngineSnapshot{})` — all nullopt, any snapshot accepted |
 | `expectHistorianSnapshot()` | Calls primary overload with default `ExpectedEngineSnapshot{}` — all don't-care |
 | `expectHistorianSnapshot(nullopt)` | `std::optional<size_t>` overload → vectorCount nullopt → don't-care |
-| `Scenarios::PublishSnapshot(vc)` | Calls `expectHistorianSnapshot(vc)` where `vc` is `std::optional<size_t>` → convenience overload ✓ |
-| `EngineDriver.hpp` | Unchanged |
+| `Scenarios::PublishSnapshot(vc)` | **Removed in D0** — was unused; no existing call site |
+| `EngineDriver.hpp` | **Removed in D0** — zero instantiations found; `#include` removed from `EngineComponentTest.cpp` |
 | `ScenarioExecutor.hpp` | Unchanged |
 | `CMakeLists.txt` | Unchanged — no new link libraries, no GMock |
 
 ---
 
-## 17. Acceptance Criteria
+## 18. Acceptance Criteria
 
-1. Normal component tests remain declarative:
+1. **Single public DSL.** Only one mechanism for writing component test scenarios:
    ```cpp
    engine.receive(engine.addVector({1, 2, 3}));
    historian.receive(historian.addVector({1, 2, 3}));
    ```
-   No `compareSignals`, `SignalMismatch`, `captureNextFailure`, formatter in `TEST_F`.
+   No `EngineDriver`, no `Scenarios::*`, no `compareSignals`, no `SignalMismatch`,
+   no `captureNextFailure`, no formatter in any `TEST_F` body.
 
-2. `payloadMatcher` returns `PayloadMatchResult`, not `bool`.
+2. **Legacy removed.** `EngineDriver.hpp` deleted. `Scenarios::*` namespace and
+   all 4 stimulus builders deleted from `Scenarios.hpp`. No regression: the 3 internal
+   expectation builders (`expectHistorianCommand`, `expectHistorianSnapshot`,
+   `expectFactoryCreate`) are kept for `ScenarioFrameworkTest`.
 
-3. Metadata mismatch shows which fields (`from`, `to`, `name`) differ with
+3. `payloadMatcher` returns `PayloadMatchResult`, not `bool`.
+
+4. Metadata mismatch shows which fields (`from`, `to`, `name`) differ with
    expected/actual values.
 
-4. Payload mismatch shows concrete field values including per-element vector diffs
+5. Payload mismatch shows concrete field values including per-element vector diffs
    (`data.size`, `data[i]`, `<missing>`).
 
-5. `CommandHistory` reports multiple field mismatches simultaneously.
+6. `CommandHistory` reports multiple field mismatches simultaneously.
 
-6. `EngineSnapshot` supports partial expectation (`running` / `strategy` /
+7. `EngineSnapshot` supports partial expectation (`running` / `strategy` /
    `vectorCount`); unchecked fields are absent from diagnostic output.
 
-7. Wrong payload type shows expected type name and actual type name.
+8. Wrong payload type shows expected type name and actual type name.
 
-8. Extra signal (no expectation) uses `SignalMismatchKind::UnexpectedExtra` —
+9. Extra signal (no expectation) uses `SignalMismatchKind::UnexpectedExtra` —
    no `"(extra)"` hack or fake field injection.
 
-9. `ScenarioVerifier` includes no domain headers (`IHistorian.hpp`,
-   `ISortStrategyFactory.hpp`, `SortStrategyId.hpp`).
+10. `ScenarioVerifier` includes no domain headers (`IHistorian.hpp`,
+    `ISortStrategyFactory.hpp`, `SortStrategyId.hpp`).
 
-10. `PayloadMismatch.hpp` and `SignalMismatch.hpp` include no project domain headers.
+11. `PayloadMismatch.hpp` and `SignalMismatch.hpp` include no project domain headers.
 
-11. `SignalMismatchFormatter.hpp` includes no domain headers.
+12. `SignalMismatchFormatter.hpp` includes no domain headers.
 
-12. Dependency graph is acyclic — proven in §11.
+13. Dependency graph is acyclic — proven in §12.
 
-13. Existing `sortStrategyIdName()` from `SortStrategyId.hpp` is used; no duplicate
+14. Existing `sortStrategyIdName()` from `SortStrategyId.hpp` is used; no duplicate
     helper function. Covers `Ascending`, `Descending`, `Bubble`.
 
-14. `SignalComparatorTest` tests structured data directly without string parsing.
+15. `SignalComparatorTest` tests structured data directly without string parsing.
 
-15. `SignalMismatchFormatterTest` tests formatted strings without `ADD_FAILURE` capture.
+16. `SignalMismatchFormatterTest` tests formatted strings without `ADD_FAILURE` capture.
 
-16. Only `ScenarioVerifierTest` (4 tests) uses `ScopedFakeTestPartResultReporter`.
+17. Only `ScenarioVerifierTest` (4 tests) uses `ScopedFakeTestPartResultReporter`.
 
-17. No GMock dependency — `CMakeLists.txt` unchanged.
+18. No GMock dependency — `CMakeLists.txt` unchanged.
 
-18. All existing tests pass after D9. New tests (D10–D12) pass additionally.
+19. All existing tests pass after D0. All existing tests pass after D9. New tests (D10–D12) pass additionally.
 
-19. Zero new warnings at current project warning flags.
+20. Zero new warnings at current project warning flags.
 
-20. Output uses unified Expected / Actual / Mismatches model across all mismatch kinds.
+21. Output uses unified Expected / Actual / Mismatches model across all mismatch kinds.
 
 ---
 
-## 18. Final Public API Examples
+## 19. Final Public API Examples
 
 These are the actual test scenarios a developer writes. No internal types appear.
 
@@ -2018,3 +2203,103 @@ Mismatches:
 
 If `running` is wrong but not in the spec, it is not reported.
 All diagnostic logic runs automatically — the test body stays declarative.
+
+---
+
+## 20. Ready for Implementation
+
+```
+[x] dependency graph acyclic
+      — proven in §12; no header re-encounters itself on any path
+
+[x] no transitive-include dependency
+      — HistorianEndpoint.hpp includes IHistorian.hpp directly;
+        FactoryEndpoint.hpp includes SortStrategyId.hpp directly;
+        PayloadMismatch.hpp, MatcherHelpers.hpp, SignalComparator.hpp
+        include <utility> directly for std::move;
+        each header includes all types it directly uses
+
+[x] cxxabi.h include guarded
+      — #if defined(__GNUC__) || defined(__clang__) guard in PayloadMismatch.hpp;
+        anyTypeName() fallback to a.type().name() always present
+
+[x] public endpoint DSL unchanged
+      — engine.receive(...) / historian.receive(...) / factory.receive(...)
+        remain the only public API in normal TEST_F bodies
+
+[x] single public DSL enforced
+      — EngineDriver.hpp removed (zero test-body instantiations found, §2.1);
+        Scenarios::* namespace and all 4 stimulus builders removed (zero usages, §2.3);
+        expectHistorianCommand / expectHistorianSnapshot / expectFactoryCreate kept as
+        internal helpers for ScenarioFrameworkTest (§2.2);
+        only endpoint DSL (engine.receive / historian.receive / factory.receive) is public
+
+[x] existing component test bodies unchanged
+      — EngineComponentTest, HistorianOnlyTest, FactoryOnlyTest, EndpointApiTest,
+        ScenarioFrameworkTest test cases are byte-for-byte unchanged;
+        EngineComponentTest.cpp gains three new fixture classes only
+
+[x] comparator tests structured
+      — SignalComparatorTest asserts on SignalMismatch fields directly;
+        no ADD_FAILURE, no string capture
+
+[x] formatter tests isolated
+      — SignalMismatchFormatterTest asserts on std::string output only;
+        no ADD_FAILURE capture; no GMock
+
+[x] only few verifier integration tests capture ADD_FAILURE
+      — ScenarioVerifierTest has 4 tests using ScopedFakeTestPartResultReporter;
+        all other tests use direct structured assertions or string helpers
+
+[x] no GMock dependency
+      — CMakeLists.txt links GTest::gtest_main only; expectContains() uses
+        std::string::find + EXPECT_NE; no EXPECT_THAT / HasSubstr
+
+[x] SignalNotReceived explicitly documented as future extension / non-goal
+      — §8.6 describes current state, future model, and explicit out-of-scope decision
+```
+
+---
+
+## 21. Legacy Frontend Removal Verification Checklist
+
+To verify that D0 is complete and correct, check each item after the commit:
+
+```
+[ ] EngineDriver.hpp deleted from filesystem
+      — file must not exist at any path in the repository
+
+[ ] #include "EngineDriver.hpp" removed from EngineComponentTest.cpp
+      — and 3 stale comments updated (lines 134, 189, 357);
+        grep -r "EngineDriver" must return zero results
+
+[ ] receiveVectorAdded deleted from Scenarios.hpp
+      — grep -r "receiveVectorAdded" must return zero results
+
+[ ] receiveSortRequested deleted from Scenarios.hpp
+      — grep -r "receiveSortRequested" must return zero results
+
+[ ] receiveStrategyChange deleted from Scenarios.hpp
+      — grep -r "receiveStrategyChange" must return zero results
+
+[ ] receivePublishSnapshot deleted from Scenarios.hpp
+      — grep -r "receivePublishSnapshot" must return zero results
+
+[ ] namespace Scenarios deleted from Scenarios.hpp
+      — grep -r "namespace Scenarios" must return zero results
+
+[ ] Scenarios::AddVector / SortVector / SetStrategy / PublishSnapshot / FullEngineFlow deleted
+      — grep -r "Scenarios::" must return zero results
+
+[ ] Scenarios.hpp retains exactly 3 logical expectation builders
+      — expectHistorianCommand, expectHistorianSnapshot (2 overloads), expectFactoryCreate present
+
+[ ] stale includes removed from Scenarios.hpp
+      — no #include <iterator>, patterns/engine/Engine.hpp, patterns/observer/SessionEvent.hpp
+
+[ ] cmake --build green after D0
+      — no compile errors, no new warnings
+
+[ ] ctest passes after D0
+      — all pre-existing tests still pass; no new failures
+```

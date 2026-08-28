@@ -1,80 +1,21 @@
 #pragma once
-#include <iterator>     // std::make_move_iterator
 #include <optional>
 #include <utility>      // std::move
 #include <vector>
 
-#include "patterns/engine/Engine.hpp"
 #include "patterns/historian/IHistorian.hpp"
-#include "patterns/observer/SessionEvent.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 #include "Signal.hpp"
+#include "MatcherHelpers.hpp"    // detail::match*
+#include "ExpectationSpecs.hpp"  // ExpectedEngineSnapshot
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Stimulus builders — Driver → Engine
-// ═══════════════════════════════════════════════════════════════════════════════
-
-inline Signal receiveVectorAdded(std::vector<int> data = {1, 2, 3}) {
-    return {
-        .role           = SignalRole::Stimulus,
-        .name           = "receiveAddVector",
-        .from           = Endpoint::Driver,
-        .to             = Endpoint::Engine,
-        .action         = [data](patterns::engine::Engine& e) {
-            patterns::observer::SessionEvent ev;
-            ev.type       = patterns::observer::SessionEventType::VectorAdded;
-            ev.vectorData = data;
-            e.onSessionEvent(ev);
-        },
-        .payloadMatcher = {}
-    };
-}
-
-inline Signal receiveSortRequested(size_t index = 0) {
-    return {
-        .role           = SignalRole::Stimulus,
-        .name           = "receiveSortRequested",
-        .from           = Endpoint::Driver,
-        .to             = Endpoint::Engine,
-        .action         = [index](patterns::engine::Engine& e) {
-            patterns::observer::SessionEvent ev;
-            ev.type  = patterns::observer::SessionEventType::SortRequested;
-            ev.index = index;
-            e.onSessionEvent(ev);
-        },
-        .payloadMatcher = {}
-    };
-}
-
-inline Signal receiveStrategyChange(patterns::strategy::SortStrategyId id) {
-    return {
-        .role           = SignalRole::Stimulus,
-        .name           = "receiveStrategyChange",
-        .from           = Endpoint::Driver,
-        .to             = Endpoint::Engine,
-        .action         = [id](patterns::engine::Engine& e) {
-            patterns::observer::SessionEvent ev;
-            ev.type       = patterns::observer::SessionEventType::StrategyChangeRequested;
-            ev.strategyId = id;
-            e.onSessionEvent(ev);
-        },
-        .payloadMatcher = {}
-    };
-}
-
-inline Signal receivePublishSnapshot() {
-    return {
-        .role           = SignalRole::Stimulus,
-        .name           = "receivePublishSnapshot",
-        .from           = Endpoint::Driver,
-        .to             = Endpoint::Engine,
-        .action         = [](patterns::engine::Engine& e) { e.publishSnapshot(); },
-        .payloadMatcher = {}
-    };
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Expectation builders — Engine → collaborator
+// Internal expectation builders — framework test infrastructure only.
+//
+// Used exclusively by ScenarioFrameworkTest (and the new SignalComparatorTest /
+// ScenarioVerifierTest) to test ScenarioVerifier in isolation.
+// These functions do NOT appear in normal component test bodies (TEST_F).
+// The public component test DSL is: engine.receive(...) / historian.receive(...)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // Expects historian.recordCommand() with given commandName.
@@ -89,22 +30,16 @@ inline Signal expectHistorianCommand(
         .from   = Endpoint::Engine,
         .to     = Endpoint::Historian,
         .action         = {},
-        .payloadMatcher = [commandName = std::move(commandName), data]
-                          (const std::any& payload) -> bool {
-            const auto* cmd =
-                std::any_cast<patterns::historian::CommandHistory>(&payload);
-            if (!cmd)                            return false;
-            if (cmd->commandName != commandName) return false;
-            if (data && cmd->data != *data)      return false;
-            return true;
+        .payloadMatcher = [n = std::move(commandName), data]
+                          (const std::any& payload) -> PayloadMatchResult {
+            return detail::matchCommandHistory(n, data, payload);
         }
     };
 }
 
 // Expects historian.publishSnapshot().
-// vectorCount: if provided, validates snap.vectorCount.
-inline Signal expectHistorianSnapshot(
-        std::optional<size_t> vectorCount = std::nullopt)
+// Primary overload: full partial expectation via ExpectedEngineSnapshot.
+inline Signal expectHistorianSnapshot(ExpectedEngineSnapshot spec = {})
 {
     return {
         .role   = SignalRole::Expectation,
@@ -112,14 +47,20 @@ inline Signal expectHistorianSnapshot(
         .from   = Endpoint::Engine,
         .to     = Endpoint::Historian,
         .action         = {},
-        .payloadMatcher = [vectorCount](const std::any& payload) -> bool {
-            const auto* snap =
-                std::any_cast<patterns::historian::EngineSnapshot>(&payload);
-            if (!snap)                                            return false;
-            if (vectorCount && snap->vectorCount != *vectorCount) return false;
-            return true;
+        .payloadMatcher = [spec](const std::any& payload) -> PayloadMatchResult {
+            return detail::matchEngineSnapshot(spec, payload);
         }
     };
+}
+
+// Convenience overload: vectorCount-only check.
+// Preserves existing call sites: expectHistorianSnapshot(std::nullopt)
+// and expectHistorianSnapshot(3).
+inline Signal expectHistorianSnapshot(std::optional<std::size_t> vectorCount)
+{
+    ExpectedEngineSnapshot spec;
+    spec.vectorCount = vectorCount;
+    return expectHistorianSnapshot(spec);
 }
 
 // Expects factory.create() called with the given SortStrategyId.
@@ -130,77 +71,8 @@ inline Signal expectFactoryCreate(patterns::strategy::SortStrategyId id) {
         .from   = Endpoint::Engine,
         .to     = Endpoint::Factory,
         .action         = {},
-        .payloadMatcher = [id](const std::any& payload) -> bool {
-            const auto* rid =
-                std::any_cast<patterns::strategy::SortStrategyId>(&payload);
-            return rid && *rid == id;
+        .payloadMatcher = [id](const std::any& payload) -> PayloadMatchResult {
+            return detail::matchSortStrategyId(id, payload);
         }
     };
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Pre-built scenario collections
-// ═══════════════════════════════════════════════════════════════════════════════
-
-namespace Scenarios {
-
-// Engine receives VectorAdded → must record command with correct payload.
-inline std::vector<Signal> AddVector(std::vector<int> data = {1, 2, 3}) {
-    return {
-        receiveVectorAdded(data),
-        expectHistorianCommand("addVector", data),
-    };
-}
-
-// Engine receives SortRequested → must record "sortVector" command.
-// Precondition: engine already has a vector at `index`.
-inline std::vector<Signal> SortVector(size_t index = 0) {
-    return {
-        receiveSortRequested(index),
-        expectHistorianCommand("sortVector"),
-    };
-}
-
-// Engine receives StrategyChangeRequested(id)
-//   → must call factory.create(id)          } same step — both
-//   → then record "setSortStrategy" command  } checked in order
-inline std::vector<Signal> SetStrategy(patterns::strategy::SortStrategyId id) {
-    return {
-        receiveStrategyChange(id),
-        expectFactoryCreate(id),
-        expectHistorianCommand("setSortStrategy"),
-    };
-}
-
-// Engine receives publishSnapshot()
-//   → must call historian.publishSnapshot() with optional vectorCount check.
-inline std::vector<Signal> PublishSnapshot(
-        std::optional<size_t> vectorCount = std::nullopt)
-{
-    return {
-        receivePublishSnapshot(),
-        expectHistorianSnapshot(vectorCount),
-    };
-}
-
-// Full flow: AddVector → SortVector → SetStrategy → PublishSnapshot.
-// Each sub-scenario forms its own step; expectations cannot bleed across steps.
-inline std::vector<Signal> FullEngineFlow(
-        std::vector<int>                   data  = {1, 2, 3},
-        patterns::strategy::SortStrategyId strat =
-            patterns::strategy::SortStrategyId::Descending)
-{
-    std::vector<Signal> scenario;
-    auto append = [&](std::vector<Signal> part) {
-        scenario.insert(scenario.end(),
-                        std::make_move_iterator(part.begin()),
-                        std::make_move_iterator(part.end()));
-    };
-    append(AddVector(data));
-    append(SortVector(0));
-    append(SetStrategy(strat));
-    append(PublishSnapshot(1));
-    return scenario;
-}
-
-} // namespace Scenarios

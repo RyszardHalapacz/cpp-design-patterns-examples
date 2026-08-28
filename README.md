@@ -84,9 +84,10 @@ At a glance, the project also covers:
 Beyond classic unit tests the project includes a component test for `Engine`
 ([`components/engine/component_test/EngineComponentTest.cpp`](components/engine/component_test/EngineComponentTest.cpp)).
 
-Unit tests verify isolated classes and operations.
+Unit tests verify isolated classes in full isolation from their collaborators.
 The component test treats `Engine` as a complete **System Under Test (SUT)**: only behaviour
-observable at the component boundary is asserted — internals are not inspected directly.
+observable at the component boundary is asserted — `Engine` is not subclassed, its private
+state is not accessed, and no internal calls are intercepted.
 
 ### Test architecture
 
@@ -102,45 +103,127 @@ observable at the component boundary is asserted — internals are not inspected
  FactorySpy
 ```
 
-`Engine` remains unaware it is under test.
 Production dependencies are replaced by test doubles wired through the same public interfaces:
 
 ```
-IHistorian           ──── HistorianSpy      (channel ON)
-                     └─── NullHistorian     (channel OFF)
+IHistorian           ──── HistorianSpy        (channel ON)
+                     └─── NullHistorian        (channel OFF)
 
-ISortStrategyFactory ──── FactorySpy        (channel ON)
-                     └─── SortStrategyFactory (channel OFF, real)
+ISortStrategyFactory ──── FactorySpy          (channel ON)
+                     └─── SortStrategyFactory  (channel OFF, real)
 ```
 
 - **`HistorianSpy`** — observation point on the `IHistorian` boundary; reports every
   `recordCommand` and `publishSnapshot` call to `ScenarioVerifier`
 - **`FactorySpy`** — observation point on the `ISortStrategyFactory` boundary; reports
   `create()` calls to `ScenarioVerifier` and delegates to the real factory
-- **`EngineDriver`** — sends stimuli to the SUT and runs per-step strict verification
+- **`ScenarioExecutor`** — coordinates step lifecycle; invoked by the endpoint objects
+- **`ScenarioVerifier`** — enforces strict ordered matching of expected vs actual signals
 
-### Scenario protocol — Stimulus + Expectation
+### Endpoint DSL — executable sequence diagram
 
-Tests are expressed as sequences of typed signals:
+Tests are written as a sequence of `receive()` calls on three typed endpoint objects:
 
 ```cpp
-driver.run({
-    receiveVectorAdded({1, 2, 3}),                   // Stimulus  → drives Engine
-    expectHistorianCommand("addVector", {1, 2, 3}),  // Expectation → must emerge
-});
+engine    // EngineEndpoint    — present in all fixtures (member of EngineTestBase)
+historian // HistorianEndpoint — present when fixture inherits HistorianSpy
+factory   // FactoryEndpoint   — present when fixture inherits FactorySpy
 ```
 
-`receive*` delivers a stimulus to `Engine`.
-`expect*` declares the exact signal that must cross the component boundary in response.
+`engine.receive(descriptor)` delivers a **stimulus** to `Engine` — this always executes.
+`historian.receive(signal)` and `factory.receive(signal)` declare **expectations** — matched
+against the signals that actually crossed the component boundary during that step.
+
+The test body reads like an **executable sequence diagram**:
+each `engine.receive()` row is a stimulus; the lines below it are the signals `Engine` must
+emit in response, declared in the exact order they must appear:
+
+```cpp
+TEST_F(EngineComponentTest, FullEngineFlow) {
+    engine.receive(engine.addVector({1, 2, 3}));
+    historian.receive(historian.addVector({1, 2, 3}));
+
+    engine.receive(engine.sortVector(0));
+    historian.receive(historian.sortVector());
+
+    engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));   // both collaborators,
+    historian.receive(historian.setSortStrategy());                 // in exact order
+
+    engine.receive(engine.publishSnapshot());
+    historian.receive(historian.publishSnapshot(1));
+}
+```
+
+`strategyChange` drives two collaborators in one step — both must be declared, in order.
+
+### Strict ordered verification
 
 Verification is **strict and ordered within each step**:
-- Undeclared signal from an active channel → `"Unexpected signal"` (immediate failure)
-- Signals arriving in wrong order → `"Unexpected signal"`
-- Expected signal that never arrives → `"Signal not received"`
 
-### Selective channel activation
+| Failure | Trigger | Message |
+|---|---|---|
+| Undeclared signal from an active channel | actual with no expectation | `"Unexpected signal"` |
+| Signals in wrong order | metadata mismatch | `"Unexpected signal"` |
+| Expected signal never arrives | expectation not satisfied | `"Signal not received"` |
 
-Fixture topology is declared via multiple inheritance — no configuration code needed:
+Empty expectation list for an active channel means **strict zero** — not "don't care":
+
+```cpp
+engine.receive(engine.addVector({1, 2, 3}));
+// historian.receive() omitted — both channels active, zero expectations declared
+// Engine calls historian.recordCommand() → "Unexpected signal"
+```
+
+### Structured payload diagnostics
+
+Payload mismatches produce structured field-level diffs, not just pass/fail:
+
+```
+Signal payload mismatch
+
+Expected signal:
+  from:         Engine
+  to:           Historian
+  name:         recordCommand
+  payload type: CommandHistory
+
+Actual signal:
+  from:         Engine
+  to:           Historian
+  name:         recordCommand
+  payload type: CommandHistory
+
+Mismatches:
+  payload.data[0]:
+    expected: 99
+    actual:   1
+  payload.data[1]:
+    expected: 99
+    actual:   2
+  payload.data[2]:
+    expected: 99
+    actual:   3
+```
+
+Each `payloadMatcher` returns `PayloadMatchResult = std::expected<void, PayloadMismatch>`.
+`SignalMismatchFormatter` converts the structured error into the message above, passed to
+`ADD_FAILURE()`.
+
+### Partial snapshot expectations
+
+`publishSnapshot` carries the full `EngineSnapshot` struct. `ExpectedEngineSnapshot` lets
+a test assert only the fields it cares about — unspecified fields are not checked:
+
+```cpp
+historian.receive(historian.publishSnapshot(1));                                    // vectorCount only
+historian.receive(historian.publishSnapshot({.running = true, .vectorCount = 2})); // two fields
+historian.receive(historian.publishSnapshot());                                     // any snapshot
+```
+
+### Topology by fixture
+
+Active channels are determined at compile time by the fixture's inheritance list:
 
 ```cpp
 class EngineComponentTest : public EngineTestBase,
@@ -148,14 +231,14 @@ class EngineComponentTest : public EngineTestBase,
                              public FactorySpy   {}; // factory channel ON
 
 class HistorianOnlyTest   : public EngineTestBase,
-                             public HistorianSpy  {}; // only historian ON
+                             public HistorianSpy  {}; // only historian active
 
 class FactoryOnlyTest     : public EngineTestBase,
-                             public FactorySpy    {}; // only factory ON
+                             public FactorySpy    {}; // only factory active
 ```
 
 `EngineTestBase::SetUp()` uses `dynamic_cast` to detect which spies the concrete fixture
-provides, then builds an `ActiveChannels` object that carries the topology to `EngineDriver`:
+provides and builds `ActiveChannels` accordingly:
 
 ```cpp
 auto* h = dynamic_cast<HistorianSpy*>(this);
@@ -163,34 +246,8 @@ auto* f = dynamic_cast<FactorySpy*>(this);
 channels_ = {h != nullptr, f != nullptr};
 ```
 
-`ActiveChannels` serves two roles:
-1. **Engine wiring** — active spy is connected; inactive channel gets a real or null collaborator
-2. **Expectation filtering** — `EngineDriver` silently skips `expect*` entries for inactive endpoints (not a failure)
-
-The same pre-built scenario works unchanged across all fixture topologies:
-
-```
-Scenarios::SetStrategy(Descending):
-  receiveStrategyChange(...)    Stimulus  → always executed
-  expectFactoryCreate(...)      Factory ON  → VERIFY  |  Factory OFF → SKIP
-  expectHistorianCommand(...)   Historian ON  → VERIFY  |  Historian OFF → SKIP
-```
-
-### Empty contract semantics
-
-An empty expectation list for an active channel means **strict zero**: any signal from
-that channel produces `"Unexpected signal"`. Empty ≠ "don't care":
-
-```cpp
-TEST_F(EngineComponentTest, LocalScenario) {
-    driver.run({
-        receiveVectorAdded({10, 20, 30}),
-      //  expectHistorianCommand(...)     ← commented out
-    });
-    // Both channels active + zero expectations = zero-tolerance.
-    // Engine calls historian.recordCommand() → "Unexpected signal".
-}
-```
+Expectations for inactive channels are silently skipped — the same scenario body works
+unchanged across all fixture topologies.
 
 ### Lifetime — weak_ptr and keepers
 
@@ -213,6 +270,12 @@ engine_->setHistorian(historianKeeper_);   // Engine's weak_ptr has a live contr
 4. ~EngineTestBase()                   keepers destroyed
 ```
 
+### GoogleTest integration
+
+Tests use `TEST_F` with shared `SetUp`/`TearDown` in each fixture. No GMock — no mock
+objects, no `EXPECT_CALL`, no action sequences. `EXPECT_NONFATAL_FAILURE` is used by the
+framework self-tests to assert that contract violations produce the expected error messages.
+
 ### Running the component test
 
 ```bash
@@ -227,21 +290,7 @@ cmake --build build --parallel
     --gtest_filter="HistorianOnlyTest.*"
 ```
 
-### Sample output (FullEngineFlow, both channels active)
-
-```
-[Driver] ---receiveVectorAdded-----------> [Engine]                       # [Engine] Event received: session state changed
-                                           [Engine] ---recordCommand-----> [HistorianSpy]
-[Driver] ---receiveSortRequested---------> [Engine]                       # [Engine] Event received: session state changed
-                                           [Engine] ---recordCommand-----> [HistorianSpy]
-[Driver] ---receiveStrategyChange--------> [Engine]                       # [Engine] Event received: session state changed
-                                           [Engine] ---create------------> [FactorySpy]
-                                           [Engine] ---recordCommand-----> [HistorianSpy]
-[Driver] ---receivePublishSnapshot-------> [Engine]
-                                           [Engine] ---publishSnapshot---> [HistorianSpy]
-```
-
-The current implementation is deliberately synchronous, separating the testing model from
+The implementation is deliberately synchronous, separating the testing model from
 concurrency concerns. The architecture allows `Engine` to move to a dedicated thread in the
 future, with direct calls replaced by message queues and timeout-based expectations.
 

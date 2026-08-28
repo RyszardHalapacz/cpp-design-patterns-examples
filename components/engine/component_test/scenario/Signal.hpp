@@ -6,6 +6,7 @@
 // Engine.hpp included directly — forward declaration conflicts with
 // 'using Engine = BasicEngine<>' alias defined in that header.
 #include "patterns/engine/Engine.hpp"
+#include "PayloadMismatch.hpp"
 
 // ─── Endpoint ─────────────────────────────────────────────────────────────────
 enum class Endpoint { Driver, Engine, Historian, Factory };
@@ -33,9 +34,9 @@ struct Signal {
     // Stimulus only: action to perform against Engine.
     std::function<void(patterns::engine::Engine&)> action;
 
-    // Expectation only: returns true if payload is acceptable.
+    // Expectation only: returns PayloadMatchResult (success or structured mismatch).
     // Null → any payload accepted (only name + endpoints checked).
-    std::function<bool(const std::any&)> payloadMatcher;
+    std::function<PayloadMatchResult(const std::any&)> payloadMatcher;
 };
 
 // ─── SignalDescriptor ─────────────────────────────────────────────────────────
@@ -50,21 +51,19 @@ struct SignalDescriptor {
 // ─── ActiveChannels ───────────────────────────────────────────────────────────
 // Declares which collaborator endpoints are actively monitored in this fixture.
 //
-// Passed to EngineDriver; expectations for inactive endpoints are silently
-// skipped when building a step — they do not participate in the contract and
-// do NOT produce "Signal not received" failures.
+// Passed to ScenarioExecutor; expectations for inactive endpoints are silently
+// skipped — they do not participate in the contract and do NOT produce
+// "Signal not received" failures.
 //
-// This lets the same pre-built scenario (e.g. Scenarios::SetStrategy) work
-// across different fixture topologies without modification:
+// Topology examples:
+//   EngineComponentTest (both ON): factory.receive(...)   → VERIFY
+//                                  historian.receive(...) → VERIFY
 //
-//   EngineComponentTest (both ON): expectFactoryCreate    → VERIFY
-//                                  expectHistorianCommand → VERIFY
+//   HistorianOnlyTest (factory OFF): factory channel absent from fixture
+//                                    historian.receive(...) → VERIFY
 //
-//   HistorianOnlyTest (factory OFF): expectFactoryCreate    → SKIP
-//                                    expectHistorianCommand → VERIFY
-//
-//   FactoryOnlyTest (historian OFF): expectFactoryCreate    → VERIFY
-//                                    expectHistorianCommand → SKIP
+//   FactoryOnlyTest (historian OFF): factory.receive(...)  → VERIFY
+//                                    historian channel absent from fixture
 
 struct ActiveChannels {
     bool historian = true;

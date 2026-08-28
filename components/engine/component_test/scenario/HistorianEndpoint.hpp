@@ -1,81 +1,70 @@
 #pragma once
 #include <any>
-#include <functional>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
 #include "Signal.hpp"
 #include "ScenarioExecutor.hpp"
+#include "ExpectationSpecs.hpp"
+#include "MatcherHelpers.hpp"
 #include "patterns/historian/IHistorian.hpp"
 
 // ─── HistorianEndpoint ────────────────────────────────────────────────────────
-// Typed test handle dla kanału Historian.
-// Publiczny member HistorianSpy — dostępny w TEST_F przez dziedziczenie.
+// Typed test handle for the Historian channel.
+// Public member of HistorianSpy — accessible in TEST_F via inheritance.
 //
-// Metody builderów (addVector, sortVector, setSortStrategy, publishSnapshot)
-// zwracają Signal z payloadMatcher. Są typowanym odpowiednikiem dotychczasowych
-// expectHistorianCommand() / expectHistorianSnapshot() z Scenarios.hpp.
+// Expectation builders delegate to detail::match* helpers in MatcherHelpers.hpp.
+// payloadMatcher returns PayloadMatchResult (structured mismatch, not bool).
 //
-// Wewnętrzne stringi ("recordCommand", "addVector" itp.) są szczegółem
-// implementacyjnym tego adaptera — scentralizowane tutaj, nie powielane w testach.
-// Zmiana nazwy komendy w Engine wymaga edycji dokładnie jednej metody.
-//
-// receive(sig) deleguje do ScenarioExecutor::declareExpectation().
+// receive(sig) delegates to ScenarioExecutor::declareExpectation().
 
 class HistorianEndpoint {
 public:
-    // ── Deskryptory expectations — domain-level ───────────────────────────────
+    // ── Expectation builders — domain-level ───────────────────────────────────
 
     [[nodiscard]] Signal addVector(std::vector<int> data) const {
-        return makeRecordCommand(
-            [data](const patterns::historian::CommandHistory& cmd) {
-                return cmd.commandName == "addVector" && cmd.data == data;
-            });
+        return makeRecordCommand("addVector", std::move(data));
     }
 
-    [[nodiscard]] Signal sortVector() const {
-        return makeRecordCommand(
-            [](const patterns::historian::CommandHistory& cmd) {
-                return cmd.commandName == "sortVector";
-            });
-    }
+    [[nodiscard]] Signal sortVector()      const { return makeRecordCommand("sortVector");      }
+    [[nodiscard]] Signal setSortStrategy() const { return makeRecordCommand("setSortStrategy"); }
 
-    [[nodiscard]] Signal setSortStrategy() const {
-        return makeRecordCommand(
-            [](const patterns::historian::CommandHistory& cmd) {
-                return cmd.commandName == "setSortStrategy";
-            });
-    }
-
-    [[nodiscard]] Signal publishSnapshot(std::optional<size_t> vectorCount = {}) const {
+    // Primary overload: full partial expectation via ExpectedEngineSnapshot.
+    [[nodiscard]] Signal publishSnapshot(ExpectedEngineSnapshot spec = {}) const {
         return {
             .role   = SignalRole::Expectation,
             .name   = "publishSnapshot",
             .from   = Endpoint::Engine,
             .to     = Endpoint::Historian,
             .action = {},
-            .payloadMatcher = [vectorCount](const std::any& payload) -> bool {
-                const auto* snap =
-                    std::any_cast<patterns::historian::EngineSnapshot>(&payload);
-                if (!snap)                                            return false;
-                if (vectorCount && snap->vectorCount != *vectorCount) return false;
-                return true;
+            .payloadMatcher = [spec](const std::any& payload) -> PayloadMatchResult {
+                return detail::matchEngineSnapshot(spec, payload);
             }
         };
     }
 
-    // ── Deklaracja expectation ────────────────────────────────────────────────
+    // Convenience overload: vectorCount-only check.
+    // Preserves existing call sites: historian.receive(historian.publishSnapshot(1))
+    [[nodiscard]] Signal publishSnapshot(std::size_t vectorCount) const {
+        ExpectedEngineSnapshot spec;
+        spec.vectorCount = vectorCount;
+        return publishSnapshot(spec);
+    }
+
+    // ── Expectation declaration ───────────────────────────────────────────────
 
     void receive(Signal sig) {
         executor_->declareExpectation(std::move(sig));
     }
 
-    // Wywoływane przez EngineTestBase::SetUp().
+    // Called by EngineTestBase::SetUp().
     void attach(ScenarioExecutor& ex) { executor_ = &ex; }
 
 private:
-    Signal makeRecordCommand(
-            std::function<bool(const patterns::historian::CommandHistory&)> matcher) const
+    // Internal helper: builds a recordCommand expectation signal.
+    Signal makeRecordCommand(const std::string&              commandName,
+                             std::optional<std::vector<int>> data = {}) const
     {
         return {
             .role   = SignalRole::Expectation,
@@ -83,10 +72,9 @@ private:
             .from   = Endpoint::Engine,
             .to     = Endpoint::Historian,
             .action = {},
-            .payloadMatcher = [m = std::move(matcher)](const std::any& payload) -> bool {
-                const auto* cmd =
-                    std::any_cast<patterns::historian::CommandHistory>(&payload);
-                return cmd && m(*cmd);
+            .payloadMatcher = [commandName, data]
+                              (const std::any& payload) -> PayloadMatchResult {
+                return detail::matchCommandHistory(commandName, data, payload);
             }
         };
     }

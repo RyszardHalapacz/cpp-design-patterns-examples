@@ -2,13 +2,17 @@
 #include <any>
 #include "Signal.hpp"
 #include "ScenarioExecutor.hpp"
+#include "MatcherHelpers.hpp"
 #include "patterns/strategy/SortStrategyId.hpp"
 
 // ─── FactoryEndpoint ──────────────────────────────────────────────────────────
-// Typed test handle dla kanału Factory.
-// Publiczny member FactorySpy — dostępny w TEST_F przez dziedziczenie.
+// Typed test handle for the Factory channel.
+// Public member of FactorySpy — accessible in TEST_F via inheritance.
 //
-// receive(sig) deleguje do ScenarioExecutor::declareExpectation().
+// create(id) delegates to detail::matchSortStrategyId in MatcherHelpers.hpp.
+// payloadMatcher returns PayloadMatchResult (structured mismatch, not bool).
+//
+// receive(sig) delegates to ScenarioExecutor::declareExpectation().
 
 class FactoryEndpoint {
 public:
@@ -19,10 +23,8 @@ public:
             .from   = Endpoint::Engine,
             .to     = Endpoint::Factory,
             .action = {},
-            .payloadMatcher = [id](const std::any& payload) -> bool {
-                const auto* rid =
-                    std::any_cast<patterns::strategy::SortStrategyId>(&payload);
-                return rid && *rid == id;
+            .payloadMatcher = [id](const std::any& payload) -> PayloadMatchResult {
+                return detail::matchSortStrategyId(id, payload);
             }
         };
     }
@@ -31,7 +33,7 @@ public:
         executor_->declareExpectation(std::move(sig));
     }
 
-    // Wywoływane przez EngineTestBase::SetUp().
+    // Called by EngineTestBase::SetUp().
     void attach(ScenarioExecutor& ex) { executor_ = &ex; }
 
 private:

@@ -5,6 +5,8 @@
 #include <gtest/gtest.h>
 #include "Signal.hpp"
 #include "SequenceLog.hpp"
+#include "SignalComparator.hpp"
+#include "SignalMismatchFormatter.hpp"
 
 // ─── ScenarioVerifier ─────────────────────────────────────────────────────────
 // Central verification engine for strict, per-step scenario contracts.
@@ -15,7 +17,7 @@
 //   flushDiagramRows()          — called by driver after GetCapturedStdout()
 //   verifyComplete()            — called by driver at end of step; disarms verifier
 //
-// ── Mode 2 — stateful per-step collection (used by EngineDriver) ─────────────
+// ── Mode 2 — stateful per-step collection (used by ScenarioExecutor) ─────────
 //   beginStep()                 — opens a new step; spies collect into stepActuals_
 //   endStepCollection()         — stops collecting; spies no longer buffer
 //   matchExpectation(exp)       — ordered match of one expectation vs stepActuals_
@@ -52,46 +54,25 @@ public:
         }
         if (!armed_ || confused_) return;
 
-        // No more expected in this step → unexpected call
+        // No more expected in this step → unexpected extra signal
         if (nextExpected_ >= expectations_.size()) {
-            ADD_FAILURE()
-                << "Unexpected signal:\n"
-                << "  from:   " << endpointName(actual.from) << "\n"
-                << "  to:     " << endpointName(actual.to)   << "\n"
-                << "  signal: " << actual.name;
+            ADD_FAILURE() << SignalMismatchFormatter::format(makeUnexpectedExtra(actual));
             confused_ = true;
             return;
         }
 
         const Signal& expected = expectations_[nextExpected_];
+        auto result = compareSignals(expected, actual);
 
-        // Wrong endpoint or name → order violation within this step
-        if (actual.from != expected.from
-                || actual.to   != expected.to
-                || actual.name != expected.name)
-        {
-            ADD_FAILURE()
-                << "Unexpected signal:\n"
-                << "  received: " << endpointName(actual.from) << " -> "
-                                  << endpointName(actual.to)   << " : " << actual.name << "\n"
-                << "  expected: " << endpointName(expected.from) << " -> "
-                                  << endpointName(expected.to)   << " : " << expected.name;
-            confused_ = true;
-            return;
+        if (!result) {
+            ADD_FAILURE() << SignalMismatchFormatter::format(result.error());
+            if (result.error().kind == SignalMismatchKind::MetadataMismatch) {
+                confused_ = true;
+                return;  // don't advance — signal was not consumed
+            }
+            // PayloadMismatch: signal was received, advance even on payload failure
         }
 
-        // Correct signal, wrong payload — advance anyway (signal was received)
-        if (expected.payloadMatcher && !expected.payloadMatcher(actual.payload)) {
-            ADD_FAILURE()
-                << "Signal payload mismatch:\n"
-                << "  signal: " << endpointName(actual.from) << " -> "
-                                << endpointName(actual.to)   << " : " << actual.name;
-            pendingRows_.emplace_back(expected.from, expected.to, expected.name);
-            ++nextExpected_;
-            return;
-        }
-
-        // All checks passed
         pendingRows_.emplace_back(expected.from, expected.to, expected.name);
         ++nextExpected_;
     }
@@ -125,7 +106,7 @@ public:
     // ── Mode 2 ───────────────────────────────────────────────────────────────
 
     // Opens a new step: clears per-step state and starts collecting actuals.
-    // Called by EngineDriver before executing a Stimulus.
+    // Called by ScenarioExecutor before executing a Stimulus.
     //
     // TODO: beginStep() powinno zakładać, że verifier jest w czystym stanie.
     //   Jeśli collectingActuals_ == true lub stepActuals_ nie jest pusty,
@@ -140,13 +121,13 @@ public:
         collectingActuals_ = true;
     }
 
-    // Stops collecting actuals. Called by EngineDriver after Stimulus execution.
+    // Stops collecting actuals. Called by ScenarioExecutor after Stimulus execution.
     void endStepCollection() {
         collectingActuals_ = false;
     }
 
     // Matches one Expectation against the next actual in stepActuals_ (ordered).
-    // Called by EngineDriver for each Expectation signal in the stream.
+    // Called by ScenarioExecutor for each Expectation signal in the stream.
     void matchExpectation(const Signal& exp) {
         if (stepConfused_) return;
 
@@ -160,24 +141,16 @@ public:
         }
 
         const SignalDescriptor& actual = stepActuals_[nextActualInStep_];
+        auto result = compareSignals(exp, actual);
 
-        if (actual.from != exp.from || actual.to != exp.to || actual.name != exp.name) {
-            ADD_FAILURE()
-                << "Unexpected signal:\n"
-                << "  received: " << endpointName(actual.from) << " -> "
-                                  << endpointName(actual.to)   << " : " << actual.name << "\n"
-                << "  expected: " << endpointName(exp.from)    << " -> "
-                                  << endpointName(exp.to)      << " : " << exp.name;
-            stepConfused_ = true;
-            ++nextActualInStep_;
-            return;
-        }
-
-        if (exp.payloadMatcher && !exp.payloadMatcher(actual.payload)) {
-            ADD_FAILURE()
-                << "Signal payload mismatch:\n"
-                << "  signal: " << endpointName(actual.from) << " -> "
-                                << endpointName(actual.to)   << " : " << actual.name;
+        if (!result) {
+            ADD_FAILURE() << SignalMismatchFormatter::format(result.error());
+            if (result.error().kind == SignalMismatchKind::MetadataMismatch) {
+                stepConfused_ = true;
+                ++nextActualInStep_;
+                return;
+            }
+            // PayloadMismatch: advance
         }
 
         pendingRows_.emplace_back(exp.from, exp.to, exp.name);
@@ -189,14 +162,9 @@ public:
     // Safe to call from a destructor — uses ADD_FAILURE (no throw).
     void finalizeStep() {
         if (!stepConfused_) {
-            for (size_t i = nextActualInStep_; i < stepActuals_.size(); ++i) {
-                const SignalDescriptor& actual = stepActuals_[i];
-                ADD_FAILURE()
-                    << "Unexpected signal:\n"
-                    << "  from:   " << endpointName(actual.from) << "\n"
-                    << "  to:     " << endpointName(actual.to)   << "\n"
-                    << "  signal: " << actual.name;
-            }
+            for (size_t i = nextActualInStep_; i < stepActuals_.size(); ++i)
+                ADD_FAILURE() << SignalMismatchFormatter::format(
+                                  makeUnexpectedExtra(stepActuals_[i]));
         }
         stepActuals_.clear();
         nextActualInStep_  = 0;

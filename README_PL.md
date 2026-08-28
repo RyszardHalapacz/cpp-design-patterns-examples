@@ -84,74 +84,198 @@ W skrócie projekt demonstruje również:
 Poza klasycznymi testami jednostkowymi projekt zawiera test komponentowy dla `Engine`
 ([`components/engine/component_test/EngineComponentTest.cpp`](components/engine/component_test/EngineComponentTest.cpp)).
 
-Testy jednostkowe weryfikują pojedyncze klasy i operacje w izolacji.
+Testy jednostkowe weryfikują izolowane klasy w pełnej izolacji od ich współpracowników.
 Test komponentowy traktuje `Engine` jako kompletny **System Under Test (SUT)**: asercje dotyczą
-wyłącznie zachowania obserwowalnego na granicy komponentu — wewnętrzna implementacja nie jest
-sprawdzana bezpośrednio.
+wyłącznie zachowania obserwowalnego na granicy komponentu — `Engine` nie jest podklasowany,
+nie ma dostępu do jego prywatnego stanu i żadne wewnętrzne wywołania nie są przechwytywane.
 
 ### Architektura testu
 
-Harness buduje minimalne środowisko potrzebne do uruchomienia `Engine`:
-
 ```
-                EngineComponentTest
-                       │
-          ┌────────────┴────────────┐
-          │                         │
-    HistorianSpy              FactorySpy
-          ▲                         ▲
-          │                         │
-          └──────── Engine ─────────┘
+              EngineTestBase (::testing::Test)
+                     │
+        ┌────────────┼────────────┐
+        │            │            │
+ EngineComponent  Historian    Factory
+ Test             OnlyTest     OnlyTest
+ ─────────────    ─────────    ──────────
+ HistorianSpy     HistorianSpy  FactorySpy
+ FactorySpy
 ```
 
-`Engine` pozostaje nieświadomy tego, że jest testowany.
 Produkcyjne zależności są zastąpione dublerami podłączonymi przez te same publiczne interfejsy:
 
 ```
-IHistorian ──── EngineHistorian   (produkcja)
-           └─── HistorianSpy      (test komponentowy)
+IHistorian           ──── HistorianSpy         (kanał ON)
+                     └─── NullHistorian         (kanał OFF)
+
+ISortStrategyFactory ──── FactorySpy           (kanał ON)
+                     └─── SortStrategyFactory   (kanał OFF, prawdziwa fabryka)
 ```
 
-- **`HistorianSpy`** — punkt obserwacyjny na granicy `IHistorian`; rejestruje każdą nazwę komendy
-  i każdy snapshot publikowany przez `Engine`
-- **`FactorySpy`** — punkt obserwacyjny na granicy `ISortStrategyFactory`; rejestruje, o jakie
-  strategie `Engine` prosi, i deleguje do prawdziwej fabryki
-- **`EngineDriver`** — dostarcza bodźce do SUT i weryfikuje obserwowalne reakcje na granicy
+- **`HistorianSpy`** — punkt obserwacyjny na granicy `IHistorian`; raportuje każde
+  wywołanie `recordCommand` i `publishSnapshot` do `ScenarioVerifier`
+- **`FactorySpy`** — punkt obserwacyjny na granicy `ISortStrategyFactory`; raportuje
+  wywołania `create()` do `ScenarioVerifier` i deleguje do prawdziwej fabryki
+- **`ScenarioExecutor`** — koordynuje cykl życia kroków; wywoływany przez obiekty endpoint
+- **`ScenarioVerifier`** — wymusza ścisłe, uporządkowane dopasowanie sygnałów
 
-### Testowanie przepływu
+### Endpoint DSL — wykonywalny diagram sekwencji
 
-Testy są opisane jako pary sygnałów receive/send:
-
-```
-receiveAddVector   →  sendAddVector
-receiveSortVector  →  sendSortVector
-receiveSetStrategy →  sendSetStrategy
-receiveSnapshot    →  sendSnapshot
-```
-
-`receive*` dostarcza bodziec do `Engine`.
-`send*` weryfikuje oczekiwane zachowanie na granicy komponentu.
-Dzięki temu test sprawdza nie tylko pojedyncze wartości zwracane, ale również kolejność
-i przepływ całej komunikacji komponentu.
-
-### Uzasadnienie projektu
-
-Fixture używa wielokrotnego dziedziczenia do deklarowania aktywnych kanałów komunikacyjnych:
+Testy są zapisane jako sekwencja wywołań `receive()` na trzech typowanych obiektach endpoint:
 
 ```cpp
-class EngineComponentTest
-    : public ::testing::Test,
-      public HistorianSpy,  // włącza kanał Engine ↔ Historian
-      public FactorySpy {}; // włącza kanał Engine ↔ Factory
+engine    // EngineEndpoint    — dostępny we wszystkich fixture'ach (member EngineTestBase)
+historian // HistorianEndpoint — dostępny gdy fixture dziedziczy po HistorianSpy
+factory   // FactoryEndpoint   — dostępny gdy fixture dziedziczy po FactorySpy
 ```
 
-`EngineDriver` używa `dynamic_cast`, żeby wykryć, które capabilities eksponuje fixture.
-Dziedziczenie po spyu włącza cały kanał; usunięcie klasy bazowej wyłącza go —
-co jest bardziej czytelne niż przełączanie pojedynczych sygnałów przy większej ich liczbie.
+`engine.receive(descriptor)` dostarcza **bodziec** do `Engine` — zawsze jest wykonany.
+`historian.receive(signal)` i `factory.receive(signal)` deklarują **oczekiwania** — są
+dopasowywane do sygnałów, które faktycznie przekroczyły granicę komponentu w danym kroku.
 
-Obecna implementacja jest celowo synchroniczna, co oddziela model testowania od problemów
-z synchronizacją. Architektura pozwala w przyszłości przenieść `Engine` do osobnego wątku,
-zastępując bezpośrednie wywołania kolejkami komunikatów i asercjami z timeoutem.
+Ciało testu czyta się jak **wykonywalny diagram sekwencji**:
+każda linia `engine.receive()` to bodziec; linie poniżej to sygnały, które `Engine` musi
+wysłać w odpowiedzi, zadeklarowane w dokładnej kolejności ich wystąpienia:
+
+```cpp
+TEST_F(EngineComponentTest, FullEngineFlow) {
+    engine.receive(engine.addVector({1, 2, 3}));
+    historian.receive(historian.addVector({1, 2, 3}));
+
+    engine.receive(engine.sortVector(0));
+    historian.receive(historian.sortVector());
+
+    engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));   // dwaj współpracownicy,
+    historian.receive(historian.setSortStrategy());                 // w dokładnej kolejności
+
+    engine.receive(engine.publishSnapshot());
+    historian.receive(historian.publishSnapshot(1));
+}
+```
+
+`strategyChange` angażuje dwóch współpracowników w jednym kroku — obaj muszą być zadeklarowani, w kolejności.
+
+### Ścisła weryfikacja z zachowaniem kolejności
+
+Weryfikacja jest **ścisła i uporządkowana w obrębie każdego kroku**:
+
+| Błąd | Wyzwalacz | Komunikat |
+|---|---|---|
+| Niezadeklarowany sygnał z aktywnego kanału | actual bez oczekiwania | `"Unexpected signal"` |
+| Sygnały w złej kolejności | niezgodność metadanych | `"Unexpected signal"` |
+| Oczekiwany sygnał nigdy nie nadszedł | oczekiwanie niespełnione | `"Signal not received"` |
+
+Pusta lista oczekiwań dla aktywnego kanału oznacza **ścisłe zero** — nie "nie obchodzi mnie":
+
+```cpp
+engine.receive(engine.addVector({1, 2, 3}));
+// historian.receive() pominięte — oba kanały aktywne, zero oczekiwań
+// Engine wywołuje historian.recordCommand() → "Unexpected signal"
+```
+
+### Strukturalne diagnostyki payload
+
+Niezgodności payload generują strukturalne diff'y na poziomie pól, nie tylko pass/fail:
+
+```
+Signal payload mismatch
+
+Expected signal:
+  from:         Engine
+  to:           Historian
+  name:         recordCommand
+  payload type: CommandHistory
+
+Actual signal:
+  from:         Engine
+  to:           Historian
+  name:         recordCommand
+  payload type: CommandHistory
+
+Mismatches:
+  payload.data[0]:
+    expected: 99
+    actual:   1
+  payload.data[1]:
+    expected: 99
+    actual:   2
+  payload.data[2]:
+    expected: 99
+    actual:   3
+```
+
+Każdy `payloadMatcher` zwraca `PayloadMatchResult = std::expected<void, PayloadMismatch>`.
+`SignalMismatchFormatter` przekształca strukturalny błąd w powyższy komunikat, przekazywany
+do `ADD_FAILURE()`.
+
+### Częściowe oczekiwania na snapshot
+
+`publishSnapshot` niesie pełną strukturę `EngineSnapshot`. `ExpectedEngineSnapshot` pozwala
+testowi sprawdzić tylko wybrane pola — nieokreślone pola nie są weryfikowane:
+
+```cpp
+historian.receive(historian.publishSnapshot(1));                                    // tylko vectorCount
+historian.receive(historian.publishSnapshot({.running = true, .vectorCount = 2})); // dwa pola
+historian.receive(historian.publishSnapshot());                                     // dowolny snapshot
+```
+
+### Topologia przez fixture
+
+Aktywne kanały są określone w czasie kompilacji przez listę klas bazowych fixture'a:
+
+```cpp
+class EngineComponentTest : public EngineTestBase,
+                             public HistorianSpy,    // kanał historian ON
+                             public FactorySpy   {}; // kanał factory ON
+
+class HistorianOnlyTest   : public EngineTestBase,
+                             public HistorianSpy  {}; // tylko historian aktywny
+
+class FactoryOnlyTest     : public EngineTestBase,
+                             public FactorySpy    {}; // tylko factory aktywny
+```
+
+`EngineTestBase::SetUp()` używa `dynamic_cast` do wykrycia, które spy'e eksponuje konkretny
+fixture, i buduje `ActiveChannels` na tej podstawie:
+
+```cpp
+auto* h = dynamic_cast<HistorianSpy*>(this);
+auto* f = dynamic_cast<FactorySpy*>(this);
+channels_ = {h != nullptr, f != nullptr};
+```
+
+Oczekiwania dla nieaktywnych kanałów są cicho pomijane — to samo ciało scenariusza działa
+bez zmian we wszystkich topologiach fixture.
+
+### Czas życia — weak_ptr i keepery
+
+`Engine` przechowuje `historian` i `factory` przez `weak_ptr`. Spy'e są pod-obiektami klasy
+bazowej fixture'a (nie są alokowane na stercie). `EngineTestBase` trzyma `historianKeeper_`
+i `factoryKeeper_` — `shared_ptr`y z no-op deleter'em, które utrzymują blok kontrolny przez
+cały czas życia fixture'a:
+
+```cpp
+historianKeeper_ = std::shared_ptr<IHistorian>(h, [](auto*){});  // no-op deleter
+engine_->setHistorian(historianKeeper_);   // weak_ptr Engine'u ma żywy blok kontrolny
+```
+
+`TearDown()` resetuje `engine_` zanim destruktory klas bazowych zniszczą pod-obiekty spy:
+
+```
+1. TearDown()      → engine_.reset()   Engine zniszczony; keepery i spy'e nadal żyją
+2. ~FactorySpy()
+3. ~HistorianSpy()
+4. ~EngineTestBase()                   keepery zniszczone
+```
+
+### Integracja z Google Test
+
+Testy używają `TEST_F` ze współdzielonym `SetUp`/`TearDown` w każdym fixture'ze. Brak GMock —
+brak obiektów mock, brak `EXPECT_CALL`, brak action sequence. `EXPECT_NONFATAL_FAILURE`
+jest używany przez framework self-testy do weryfikacji, że naruszenia kontraktu generują
+oczekiwane komunikaty błędów.
 
 ### Uruchomienie testu komponentowego
 
@@ -162,39 +286,14 @@ cmake --build build --parallel
 # Uruchomienie wszystkich testów komponentowych
 ./build/components/engine/component_test/engine_component_tests
 
-# Uruchomienie jednego przypadku testowego
-./build/components/engine/component_test/engine_component_tests --gtest_filter="EngineComponentTest.RunExecutesAllSignals"
+# Uruchomienie konkretnego fixture'a
+./build/components/engine/component_test/engine_component_tests \
+    --gtest_filter="HistorianOnlyTest.*"
 ```
 
-### Włączanie i wyłączanie kanałów
-
-Usunięcie klasy bazowej z fixture wyłącza cały kanał — wszystkie lambdy `send*` dla tego
-spy zwracają `false` i wiersze znikają z diagramu bez modyfikowania `EngineDriver`:
-
-```cpp
-class EngineComponentTest
-    : public ::testing::Test,
-      public HistorianSpy,   // usuń → wyłącza kanał Engine ↔ Historian
-      public FactorySpy {};  // usuń → wyłącza kanał Engine ↔ Factory
-```
-
-### Przykładowy przebieg (oba kanały aktywne)
-
-```
-[Driver] ---receiveAddVector------> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: vector added
-                                    [Engine] ---sendAddVector---------> [HistorianSpy]
-[Driver] ---receiveSortVector-----> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: sort requested
-                                                                                            # [Engine] Sorting with strategy: Ascending
-                                    [Engine] ---sendSortVector---------> [HistorianSpy]
-[Driver] ---receiveSetStrategy----> [Engine]                                                # [Engine] Event received: session state changed
-                                                                                            # [Engine] -> recognized: strategy change requested
-                                                                                            # [Engine] Sort strategy set: Descending
-                                    [Engine] ---sendSetStrategy-------> [FactorySpy]
-[Driver] ---receiveSnapshot-------> [Engine]
-                                    [Engine] ---sendSnapshot-----------> [HistorianSpy]
-```
+Implementacja jest celowo synchroniczna, co oddziela model testowania od problemów
+z współbieżnością. Architektura pozwala w przyszłości przenieść `Engine` do osobnego wątku,
+zastępując bezpośrednie wywołania kolejkami komunikatów i oczekiwaniami z timeoutem.
 
 ---
 
