@@ -126,6 +126,13 @@ public:
 
     // Opens a new step: clears per-step state and starts collecting actuals.
     // Called by EngineDriver before executing a Stimulus.
+    //
+    // TODO: beginStep() powinno zakładać, że verifier jest w czystym stanie.
+    //   Jeśli collectingActuals_ == true lub stepActuals_ nie jest pusty,
+    //   oznacza to że poprzedni krok nie został domknięty przez finalizeStep().
+    //   Zamiast cicho kasować dane, powinno zgłosić ADD_FAILURE() z komunikatem
+    //   "beginStep() called on an already-open step (missing finalizeStep())".
+    //   Czyszczenie stanu to odpowiedzialność finalizeStep(), nie beginStep().
     void beginStep() {
         stepActuals_.clear();
         nextActualInStep_ = 0;

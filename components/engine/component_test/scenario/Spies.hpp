@@ -4,6 +4,8 @@
 #include "patterns/strategy/ISortStrategyFactory.hpp"
 #include "patterns/strategy/SortStrategyFactory.hpp"
 #include "ScenarioVerifier.hpp"
+#include "HistorianEndpoint.hpp"
+#include "FactoryEndpoint.hpp"
 
 // ─── HistorianSpy ─────────────────────────────────────────────────────────────
 // Reports every IHistorian call synchronously to ScenarioVerifier.
@@ -14,9 +16,10 @@
 
 class HistorianSpy : public patterns::historian::IHistorian {
 public:
-    HistorianSpy() = default;
+    HistorianEndpoint historian;   // typed test handle — dostępny w TEST_F
 
     void attachVerifier(ScenarioVerifier& v) { spyVerifier_ = &v; }
+    void attachEndpoint(ScenarioExecutor& ex) { historian.attach(ex); }
 
     void recordCommand(const patterns::historian::CommandHistory& cmd) override {
         if (!spyVerifier_) return;
@@ -53,9 +56,10 @@ private:
 
 class FactorySpy : public patterns::strategy::ISortStrategyFactory {
 public:
-    FactorySpy() = default;
+    FactoryEndpoint factory;   // typed test handle — dostępny w TEST_F
 
     void attachVerifier(ScenarioVerifier& v) { spyVerifier_ = &v; }
+    void attachEndpoint(ScenarioExecutor& ex) { factory.attach(ex); }
 
     [[nodiscard]] std::expected<std::unique_ptr<patterns::strategy::ISortStrategy>, std::string>
     create(patterns::strategy::SortStrategyId id) override {
