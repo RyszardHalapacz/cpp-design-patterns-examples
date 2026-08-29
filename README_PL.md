@@ -126,8 +126,8 @@ Testy są zapisane jako sekwencja wywołań `receive()` na trzech typowanych obi
 
 ```cpp
 engine    // EngineEndpoint    — dostępny we wszystkich fixture'ach (member EngineTestBase)
-historian // HistorianEndpoint — dostępny gdy fixture dziedziczy po HistorianSpy
-factory   // FactoryEndpoint   — dostępny gdy fixture dziedziczy po FactorySpy
+historian // HistorianEndpoint — dostępny we wszystkich fixture'ach (member EngineTestBase)
+factory   // FactoryEndpoint   — dostępny we wszystkich fixture'ach (member EngineTestBase)
 ```
 
 `engine.receive(descriptor)` dostarcza **bodziec** do `Engine` — zawsze jest wykonany.
@@ -223,7 +223,7 @@ historian.receive(historian.publishSnapshot());                                 
 
 ### Topologia przez fixture
 
-Aktywne kanały są określone w czasie kompilacji przez listę klas bazowych fixture'a:
+Aktywne kanały są deklarowane przez listę klas bazowych fixture'a i wykrywane w czasie wykonania przez `dynamic_cast`:
 
 ```cpp
 class EngineComponentTest : public EngineTestBase,

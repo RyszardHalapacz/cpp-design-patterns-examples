@@ -12,12 +12,13 @@
 
 // ─── HistorianEndpoint ────────────────────────────────────────────────────────
 // Typed test handle for the Historian channel.
-// Public member of HistorianSpy — accessible in TEST_F via inheritance.
+// Public member of EngineTestBase — accessible in all fixtures.
 //
 // Expectation builders delegate to detail::match* helpers in MatcherHelpers.hpp.
 // payloadMatcher returns PayloadMatchResult (structured mismatch, not bool).
 //
 // receive(sig) delegates to ScenarioExecutor::declareExpectation().
+// Inactive channel (channels_.historian=false): declareExpectation() silently skips.
 
 class HistorianEndpoint {
 public:
@@ -33,11 +34,9 @@ public:
     // Primary overload: full partial expectation via ExpectedEngineSnapshot.
     [[nodiscard]] Signal publishSnapshot(ExpectedEngineSnapshot spec = {}) const {
         return {
-            .role   = SignalRole::Expectation,
             .name   = "publishSnapshot",
             .from   = Endpoint::Engine,
             .to     = Endpoint::Historian,
-            .action = {},
             .payloadMatcher = [spec](const std::any& payload) -> PayloadMatchResult {
                 return detail::matchEngineSnapshot(spec, payload);
             }
@@ -67,11 +66,9 @@ private:
                              std::optional<std::vector<int>> data = {}) const
     {
         return {
-            .role   = SignalRole::Expectation,
             .name   = "recordCommand",
             .from   = Endpoint::Engine,
             .to     = Endpoint::Historian,
-            .action = {},
             .payloadMatcher = [commandName, data]
                               (const std::any& payload) -> PayloadMatchResult {
                 return detail::matchCommandHistory(commandName, data, payload);

@@ -3,9 +3,6 @@
 #include <functional>
 #include <string>
 
-// Engine.hpp included directly — forward declaration conflicts with
-// 'using Engine = BasicEngine<>' alias defined in that header.
-#include "patterns/engine/Engine.hpp"
 #include "PayloadMismatch.hpp"
 
 // ─── Endpoint ─────────────────────────────────────────────────────────────────
@@ -21,20 +18,16 @@ inline const char* endpointName(Endpoint e) noexcept {
     return "?";
 }
 
-// ─── SignalRole ────────────────────────────────────────────────────────────────
-enum class SignalRole { Stimulus, Expectation };
-
 // ─── Signal ───────────────────────────────────────────────────────────────────
+// Expectation descriptor: describes a signal Engine must emit on a collaborator boundary.
+// Built by HistorianEndpoint / FactoryEndpoint builder methods and passed to
+// ScenarioExecutor::declareExpectation() via endpoint::receive().
 struct Signal {
-    SignalRole  role;
     std::string name;
     Endpoint    from;
     Endpoint    to;
 
-    // Stimulus only: action to perform against Engine.
-    std::function<void(patterns::engine::Engine&)> action;
-
-    // Expectation only: returns PayloadMatchResult (success or structured mismatch).
+    // Returns PayloadMatchResult (success or structured mismatch).
     // Null → any payload accepted (only name + endpoints checked).
     std::function<PayloadMatchResult(const std::any&)> payloadMatcher;
 };
@@ -56,14 +49,14 @@ struct SignalDescriptor {
 // "Signal not received" failures.
 //
 // Topology examples:
-//   EngineComponentTest (both ON): factory.receive(...)   → VERIFY
-//                                  historian.receive(...) → VERIFY
-//
-//   HistorianOnlyTest (factory OFF): factory channel absent from fixture
+//   EngineComponentTest (both ON):   factory.receive(...)   → VERIFY
 //                                    historian.receive(...) → VERIFY
 //
-//   FactoryOnlyTest (historian OFF): factory.receive(...)  → VERIFY
-//                                    historian channel absent from fixture
+//   HistorianOnlyTest (factory OFF): factory.receive(...)   → silently skipped
+//                                    historian.receive(...) → VERIFY
+//
+//   FactoryOnlyTest (historian OFF): factory.receive(...)   → VERIFY
+//                                    historian.receive(...) → silently skipped
 
 struct ActiveChannels {
     bool historian = true;

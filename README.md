@@ -126,8 +126,8 @@ Tests are written as a sequence of `receive()` calls on three typed endpoint obj
 
 ```cpp
 engine    // EngineEndpoint    — present in all fixtures (member of EngineTestBase)
-historian // HistorianEndpoint — present when fixture inherits HistorianSpy
-factory   // FactoryEndpoint   — present when fixture inherits FactorySpy
+historian // HistorianEndpoint — present in all fixtures (member of EngineTestBase)
+factory   // FactoryEndpoint   — present in all fixtures (member of EngineTestBase)
 ```
 
 `engine.receive(descriptor)` delivers a **stimulus** to `Engine` — this always executes.
@@ -223,7 +223,7 @@ historian.receive(historian.publishSnapshot());                                 
 
 ### Topology by fixture
 
-Active channels are determined at compile time by the fixture's inheritance list:
+Active channels are declared by the fixture's inheritance list and detected at runtime via `dynamic_cast`:
 
 ```cpp
 class EngineComponentTest : public EngineTestBase,

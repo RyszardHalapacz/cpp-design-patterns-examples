@@ -17,6 +17,8 @@
 #include "scenario/ScenarioVerifier.hpp"
 #include "scenario/ScenarioExecutor.hpp"
 #include "scenario/EngineEndpoint.hpp"
+#include "scenario/HistorianEndpoint.hpp"
+#include "scenario/FactoryEndpoint.hpp"
 #include "scenario/Spies.hpp"
 #include "scenario/Scenarios.hpp"
 #include "scenario/SignalComparator.hpp"
@@ -69,73 +71,12 @@ protected:
     }
 };
 
-// Actual signal arrives with no expectation registered → Unexpected signal.
-TEST_F(ScenarioFrameworkTest, UnexpectedSignal_NoExpectation) {
-    verifier_.setExpected({});
-    EXPECT_NONFATAL_FAILURE(
-        verifier_.report(historianCommand("addVector")),
-        "Unexpected signal"
-    );
-}
+// ─── ScenarioVerifier contract tests ─────────────────────────────────────────
+// Call the verifier API directly (beginStep / report / endStepCollection /
+// matchExpectation / finalizeStep) without a real Engine.
 
-// Expected signal never arrives → Signal not received.
-TEST_F(ScenarioFrameworkTest, SignalNotReceived) {
-    verifier_.setExpected({expectHistorianCommand("addVector")});
-    EXPECT_NONFATAL_FAILURE(
-        verifier_.verifyComplete(),
-        "Signal not received"
-    );
-}
-
-// Signals arrive in wrong order within a step.
-// Expected: recordCommand then publishSnapshot.
-// Received: publishSnapshot first.
-TEST_F(ScenarioFrameworkTest, WrongOrder) {
-    verifier_.setExpected({
-        expectHistorianCommand("addVector"),
-        expectHistorianSnapshot(),
-    });
-    EXPECT_NONFATAL_FAILURE(
-        verifier_.report(historianSnapshot(0)),
-        "Unexpected signal"
-    );
-}
-
-// Correct signal name and endpoint, but wrong payload data.
-TEST_F(ScenarioFrameworkTest, PayloadMismatch) {
-    verifier_.setExpected({expectHistorianCommand("addVector", {{1, 2, 3}})});
-    EXPECT_NONFATAL_FAILURE(
-        verifier_.report(historianCommand("addVector", {9, 9, 9})),
-        "payload mismatch"
-    );
-}
-
-// Regression test for rev 1 bug: signal produced during Step 1 must not
-// satisfy an expectation belonging to Step 2.
-//
-// Simulates: publishSnapshot sent during addVector processing (wrong step).
-// Step 1 knows only about recordCommand, so publishSnapshot is Unexpected.
-TEST_F(ScenarioFrameworkTest, SignalFromWrongStep_RegressionRev1) {
-    // Step 1 scope: only recordCommand expected.
-    verifier_.setExpected({expectHistorianCommand("addVector")});
-
-    // recordCommand arrives → OK.
-    verifier_.report(historianCommand("addVector"));
-
-    // publishSnapshot arrives still inside Step 1 — no expectation for it.
-    EXPECT_NONFATAL_FAILURE(
-        verifier_.report(historianSnapshot(0)),
-        "Unexpected signal"
-    );
-}
-
-// ─── Mode 2 parity tests ──────────────────────────────────────────────────────
-// Verify that ScenarioVerifier Mode 2 (beginStep / matchExpectation / finalizeStep)
-// enforces the same strict contract as Mode 1 (setExpected / report / verifyComplete).
-// These tests call the verifier API directly, without a real Engine.
-
-// Actual arrives with no matching expectation → finalizeStep reports Unexpected signal.
-TEST_F(ScenarioFrameworkTest, Mode2_UnexpectedSignal) {
+// Actual arrives with no matching expectation → finalizeStep reports "Unexpected signal".
+TEST_F(ScenarioFrameworkTest, UnexpectedSignal) {
     verifier_.beginStep();
     verifier_.report(historianCommand("addVector"));
     verifier_.endStepCollection();
@@ -145,8 +86,8 @@ TEST_F(ScenarioFrameworkTest, Mode2_UnexpectedSignal) {
     );
 }
 
-// No actual arrives but expectation is declared → Signal not received.
-TEST_F(ScenarioFrameworkTest, Mode2_SignalNotReceived) {
+// No actual arrives but expectation is declared → "Signal not received".
+TEST_F(ScenarioFrameworkTest, SignalNotReceived) {
     verifier_.beginStep();
     // no report() calls — stepActuals_ stays empty
     verifier_.endStepCollection();
@@ -157,12 +98,12 @@ TEST_F(ScenarioFrameworkTest, Mode2_SignalNotReceived) {
 }
 
 // Two actuals arrive in order A, B. Expectation for B declared first → wrong order.
-TEST_F(ScenarioFrameworkTest, Mode2_WrongOrder) {
+TEST_F(ScenarioFrameworkTest, WrongOrder) {
     verifier_.beginStep();
     verifier_.report(historianCommand("addVector"));   // actual[0]
     verifier_.report(historianSnapshot(0));            // actual[1]
     verifier_.endStepCollection();
-    // Request second actual before first:
+    // Request second actual before first → actual[0] doesn't match snapshot:
     EXPECT_NONFATAL_FAILURE(
         verifier_.matchExpectation(expectHistorianSnapshot()),
         "Unexpected signal"
@@ -170,13 +111,29 @@ TEST_F(ScenarioFrameworkTest, Mode2_WrongOrder) {
 }
 
 // Correct signal name and endpoint but wrong payload data.
-TEST_F(ScenarioFrameworkTest, Mode2_PayloadMismatch) {
+TEST_F(ScenarioFrameworkTest, PayloadMismatch) {
     verifier_.beginStep();
     verifier_.report(historianCommand("addVector", {9, 9, 9}));
     verifier_.endStepCollection();
     EXPECT_NONFATAL_FAILURE(
         verifier_.matchExpectation(expectHistorianCommand("addVector", {{1, 2, 3}})),
         "payload mismatch"
+    );
+}
+
+// Regression: signal produced during Step 1 must not satisfy an expectation
+// belonging to Step 2. publishSnapshot arrives inside Step 1 with no matching
+// expectation → finalizeStep reports "Unexpected signal".
+TEST_F(ScenarioFrameworkTest, SignalFromWrongStep_RegressionRev1) {
+    // Step 1 scope: only recordCommand expected.
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector"));  // actual[0]: recordCommand
+    verifier_.report(historianSnapshot(0));           // actual[1]: publishSnapshot — no expectation
+    verifier_.endStepCollection();
+    verifier_.matchExpectation(expectHistorianCommand("addVector"));  // actual[0] → OK
+    EXPECT_NONFATAL_FAILURE(
+        verifier_.finalizeStep(),   // actual[1] unmatched → "Unexpected signal"
+        "Unexpected signal"
     );
 }
 
@@ -206,8 +163,11 @@ TEST_F(ScenarioFrameworkTest, Mode2_PayloadMismatch) {
 class EngineTestBase : public ::testing::Test {
 protected:
     // ── Public test API — accessible directly in TEST_F ──────────────────────
-    // historian / factory available when the fixture inherits HistorianSpy / FactorySpy.
-    EngineEndpoint engine;
+    // All three endpoints exist in every fixture. factory.receive() / historian.receive()
+    // in a fixture without the corresponding spy are silently filtered by channels_.
+    EngineEndpoint    engine;
+    HistorianEndpoint historian;
+    FactoryEndpoint   factory;
 
     void SetUp() override {
         [[maybe_unused]] auto r = ServiceLocator::instance().provide<Logger>(
@@ -224,12 +184,14 @@ protected:
 
         executor_ = std::make_unique<ScenarioExecutor>(verifier_, channels_);
         engine.attach(*executor_, *engine_);
+        // Endpoints always attached — channels_.isActive() filters inactive ones in executor.
+        historian.attach(*executor_);
+        factory.attach(*executor_);
 
         // ── Historian channel ─────────────────────────────────────────────────
         // Engine stores historian via weak_ptr; keeper extends control block lifetime.
         if (h) {
             h->attachVerifier(verifier_);
-            h->attachEndpoint(*executor_);
             historianKeeper_ =
                 std::shared_ptr<patterns::historian::IHistorian>(h, [](auto*){});
             engine_->setHistorian(historianKeeper_);
@@ -244,7 +206,6 @@ protected:
         // verifier_ not yet collecting (collectingActuals_=false) → call silently ignored.
         if (f) {
             f->attachVerifier(verifier_);
-            f->attachEndpoint(*executor_);
             factoryKeeper_ =
                 std::shared_ptr<patterns::strategy::ISortStrategyFactory>(f, [](auto*){});
             engine_->setFactory(factoryKeeper_);
@@ -506,15 +467,12 @@ TEST_F(EngineComponentTest, MultiStep_MixedSequence)
 // dynamic_cast<FactorySpy*>(this)   → null     → real SortStrategyFactory wired
 // channels_ = { historian: true, factory: false }
 //
-// `factory` does not exist as a member — the compiler blocks factory.receive().
-// No factory.receive() declaration = no expectation for the factory channel.
-// ScenarioExecutor silently skips the factory channel (channels_.factory=false).
+// `factory` exists in EngineTestBase but channels_.factory=false.
+// factory.receive() is silently filtered by ScenarioExecutor.declareExpectation().
+// The same DSL body used in EngineComponentTest works here unchanged.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class HistorianOnlyTest : public EngineTestBase, public HistorianSpy {};
-
-// In the new API, no factory.receive() = no expectation for the factory channel.
-// factory does not exist in this fixture — the compiler blocks its use.
 
 TEST_F(HistorianOnlyTest, AddVector) {
     engine.receive(engine.addVector({1, 2, 3}));
@@ -527,11 +485,11 @@ TEST_F(HistorianOnlyTest, SortVector) {
     historian.receive(historian.sortVector());
 }
 
-// Factory channel inactive — no factory.receive() means no expectation.
-// factory.create() is called by Engine but no one verifies it.
-// This is intentional: the fixture declares contracts only for the channels it monitors.
+// Factory channel inactive — factory.receive() is silently filtered, not a failure.
+// Same DSL body as EngineComponentTest::SetStrategy — cross-topology compatible.
 TEST_F(HistorianOnlyTest, SetStrategy) {
     engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));   // channels_.factory=false → skipped
     historian.receive(historian.setSortStrategy());
 }
 
@@ -542,30 +500,37 @@ TEST_F(HistorianOnlyTest, PublishSnapshot) {
 }
 
 TEST_F(HistorianOnlyTest, FullEngineFlow) {
-
+    engine.receive(engine.addVector({1, 2, 3}));
+    historian.receive(historian.addVector({1, 2, 3}));
 
     engine.receive(engine.addVector({1, 2, 3}));
     historian.receive(historian.addVector({1, 2, 3}));
-    engine.receive(engine.addVector({1, 2, 3}));
-    historian.receive(historian.addVector({1, 2, 3}));
+
     engine.receive(engine.sortVector(0));
     historian.receive(historian.sortVector());
-     engine.receive(engine.addVector({1, 2, 3}));
+
+    engine.receive(engine.addVector({1, 2, 3}));
     historian.receive(historian.addVector({1, 2, 3}));
+
     engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));  // channels_.factory=false → skipped
     historian.receive(historian.setSortStrategy());
 
     engine.receive(engine.addVector({1, 2, 3}));
     historian.receive(historian.addVector({1, 2, 3}));
+
     engine.receive(engine.addVector({1, 2, 3}));
     historian.receive(historian.addVector({1, 2, 3}));
+
     engine.receive(engine.sortVector(0));
     historian.receive(historian.sortVector());
-     engine.receive(engine.addVector({1, 2, 3}));
-    historian.receive(historian.addVector({1, 2, 3}));
-    engine.receive(engine.strategyChange(SortStrategyId::Descending));
-    historian.receive(historian.setSortStrategy());
 
+    engine.receive(engine.addVector({1, 2, 3}));
+    historian.receive(historian.addVector({1, 2, 3}));
+
+    engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));  // channels_.factory=false → skipped
+    historian.receive(historian.setSortStrategy());
 
     engine.receive(engine.publishSnapshot());
     historian.receive(historian.publishSnapshot(6));
@@ -582,19 +547,19 @@ TEST_F(HistorianOnlyTest, HistorianOnly_PayloadVerified) {
 // dynamic_cast<FactorySpy*>(this)   → non-null → FactorySpy   wired
 // channels_ = { historian: false, factory: true }
 //
-// `historian` does not exist as a member — the compiler blocks historian.receive().
-// No historian.receive() declaration = no expectation for the historian channel.
-// ScenarioExecutor silently skips the historian channel (channels_.historian=false).
+// `historian` exists in EngineTestBase but channels_.historian=false.
+// historian.receive() is silently filtered by ScenarioExecutor.declareExpectation().
+// The same DSL body used in EngineComponentTest works here unchanged.
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class FactoryOnlyTest : public EngineTestBase, public FactorySpy {};
 
-// historian does not exist in this fixture — the compiler blocks its use.
-
-// Historian channel inactive — only factory.create() is verified.
+// Historian channel inactive — historian.receive() calls are silently filtered.
+// Same DSL body as EngineComponentTest::SetStrategy — cross-topology compatible.
 TEST_F(FactoryOnlyTest, SetStrategy) {
     engine.receive(engine.strategyChange(SortStrategyId::Descending));
     factory.receive(factory.create(SortStrategyId::Descending));
+    historian.receive(historian.setSortStrategy());   // channels_.historian=false → skipped
 }
 
 // AddVector, SortVector, PublishSnapshot do not call factory.create().
@@ -622,6 +587,35 @@ TEST_F(FactoryOnlyTest, SignalNotReceived) {
         factory.receive(factory.create(SortStrategyId::Ascending)),
         "Signal not received"
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// A5 — Cross-topology regression guard
+// ─────────────────────────────────────────────────────────────────────────────
+// Verifies that calling factory.receive() in a historian-only fixture and
+// historian.receive() in a factory-only fixture is silently filtered — not a
+// compile error and not a "Signal not received" failure.
+//
+// Regression: before Option C, endpoints lived inside HistorianSpy / FactorySpy.
+// factory.receive() in HistorianOnlyTest was a compile error (no `factory` member).
+// After Option C, endpoints live in EngineTestBase — always present, always attachable.
+// channels_.isActive() in ScenarioExecutor::declareExpectation() performs the filter.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// HistorianOnlyTest: calling factory.receive() must NOT trigger "Signal not received".
+// channels_.factory=false → ScenarioExecutor silently drops the expectation.
+TEST_F(HistorianOnlyTest, CrossTopology_FactoryReceiveSkipped) {
+    engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));   // skipped — factory inactive
+    historian.receive(historian.setSortStrategy());
+}
+
+// FactoryOnlyTest: calling historian.receive() must NOT trigger "Signal not received".
+// channels_.historian=false → ScenarioExecutor silently drops the expectation.
+TEST_F(FactoryOnlyTest, CrossTopology_HistorianReceiveSkipped) {
+    engine.receive(engine.strategyChange(SortStrategyId::Descending));
+    factory.receive(factory.create(SortStrategyId::Descending));
+    historian.receive(historian.setSortStrategy());   // skipped — historian inactive
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -979,11 +973,13 @@ protected:
     }
 };
 
-// Mode 1: metadata mismatch → "Unexpected signal" + field diff in ADD_FAILURE.
+// Metadata mismatch → "Unexpected signal" + field diff in ADD_FAILURE.
 TEST_F(ScenarioVerifierTest, Integration_MetadataMismatch_ReportsFields) {
-    verifier_.setExpected({expectHistorianCommand("addVector")});
+    verifier_.beginStep();
+    verifier_.report(factoryCreate(SortStrategyId::Ascending));
+    verifier_.endStepCollection();
     auto msg = captureFailure([&]{
-        verifier_.report(factoryCreate(SortStrategyId::Ascending));
+        verifier_.matchExpectation(expectHistorianCommand("addVector"));
     });
     expectContains(msg, "Unexpected signal");
     expectContains(msg, "field [to]");
@@ -991,29 +987,34 @@ TEST_F(ScenarioVerifierTest, Integration_MetadataMismatch_ReportsFields) {
     expectContains(msg, "Factory");
 }
 
-// Mode 1: payload mismatch → "payload mismatch" + vector element diff.
+// Payload mismatch → "payload mismatch" + vector element diff.
 TEST_F(ScenarioVerifierTest, Integration_PayloadMismatch_VectorDiff) {
-    verifier_.setExpected({expectHistorianCommand("addVector", {{1,2,3}})});
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector", {1,2,99}));
+    verifier_.endStepCollection();
     auto msg = captureFailure([&]{
-        verifier_.report(historianCommand("addVector", {1,2,99}));
+        verifier_.matchExpectation(expectHistorianCommand("addVector", {{1,2,3}}));
     });
     expectContains(msg, "payload mismatch");
     expectContains(msg, "data[2]");
     expectContains(msg, "99");
 }
 
-// Mode 1: unexpected extra → "Unexpected signal" + "(none".
+// Unexpected extra → "Unexpected signal" + "(none".
 TEST_F(ScenarioVerifierTest, Integration_UnexpectedExtra) {
-    verifier_.setExpected({});
+    verifier_.beginStep();
+    verifier_.report(historianCommand("addVector"));
+    verifier_.endStepCollection();
+    // No matchExpectation called — actual is unmatched.
     auto msg = captureFailure([&]{
-        verifier_.report(historianCommand("addVector"));
+        verifier_.finalizeStep();
     });
     expectContains(msg, "Unexpected signal");
     expectContains(msg, "(none");
 }
 
-// Mode 2: payload mismatch in matchExpectation → "payload mismatch" + field diff.
-TEST_F(ScenarioVerifierTest, Integration_Mode2_PayloadDiff) {
+// Payload mismatch in matchExpectation → "payload mismatch" + field diff.
+TEST_F(ScenarioVerifierTest, Integration_PayloadDiff) {
     verifier_.beginStep();
     verifier_.report(historianCommand("addVector", {9,9,9}));
     verifier_.endStepCollection();

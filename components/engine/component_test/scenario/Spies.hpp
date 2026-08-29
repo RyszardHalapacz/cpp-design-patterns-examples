@@ -4,22 +4,18 @@
 #include "patterns/strategy/ISortStrategyFactory.hpp"
 #include "patterns/strategy/SortStrategyFactory.hpp"
 #include "ScenarioVerifier.hpp"
-#include "HistorianEndpoint.hpp"
-#include "FactoryEndpoint.hpp"
 
 // ─── HistorianSpy ─────────────────────────────────────────────────────────────
 // Reports every IHistorian call synchronously to ScenarioVerifier.
-// Calls arriving outside an active step (armed_=false) are silently ignored.
+// Calls arriving outside an active step (collectingActuals_=false) are silently
+// discarded by ScenarioVerifier::report().
 //
 // Default-constructible for use as a base class via multiple inheritance.
 // EngineTestBase::SetUp() calls attachVerifier(spyVerifier_) before any stimulus.
 
 class HistorianSpy : public patterns::historian::IHistorian {
 public:
-    HistorianEndpoint historian;   // typed test handle — dostępny w TEST_F
-
     void attachVerifier(ScenarioVerifier& v) { spyVerifier_ = &v; }
-    void attachEndpoint(ScenarioExecutor& ex) { historian.attach(ex); }
 
     void recordCommand(const patterns::historian::CommandHistory& cmd) override {
         if (!spyVerifier_) return;
@@ -51,15 +47,12 @@ private:
 //
 // Default-constructible for use as a base class via multiple inheritance.
 // EngineTestBase::SetUp() calls attachVerifier(spyVerifier_) before any stimulus.
-// The initial create(Ascending) from setFactory() is silently ignored
-// because spyVerifier_ is not yet armed (armed_=false).
+// The initial create(Ascending) from setFactory() is silently discarded because
+// no step is open (collectingActuals_=false) at that point.
 
 class FactorySpy : public patterns::strategy::ISortStrategyFactory {
 public:
-    FactoryEndpoint factory;   // typed test handle — dostępny w TEST_F
-
     void attachVerifier(ScenarioVerifier& v) { spyVerifier_ = &v; }
-    void attachEndpoint(ScenarioExecutor& ex) { factory.attach(ex); }
 
     [[nodiscard]] std::expected<std::unique_ptr<patterns::strategy::ISortStrategy>, std::string>
     create(patterns::strategy::SortStrategyId id) override {

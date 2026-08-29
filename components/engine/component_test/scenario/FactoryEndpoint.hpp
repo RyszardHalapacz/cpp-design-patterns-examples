@@ -7,22 +7,21 @@
 
 // ─── FactoryEndpoint ──────────────────────────────────────────────────────────
 // Typed test handle for the Factory channel.
-// Public member of FactorySpy — accessible in TEST_F via inheritance.
+// Public member of EngineTestBase — accessible in all fixtures.
 //
 // create(id) delegates to detail::matchSortStrategyId in MatcherHelpers.hpp.
 // payloadMatcher returns PayloadMatchResult (structured mismatch, not bool).
 //
 // receive(sig) delegates to ScenarioExecutor::declareExpectation().
+// Inactive channel (channels_.factory=false): declareExpectation() silently skips.
 
 class FactoryEndpoint {
 public:
     [[nodiscard]] Signal create(patterns::strategy::SortStrategyId id) const {
         return {
-            .role   = SignalRole::Expectation,
             .name   = "create",
             .from   = Endpoint::Engine,
             .to     = Endpoint::Factory,
-            .action = {},
             .payloadMatcher = [id](const std::any& payload) -> PayloadMatchResult {
                 return detail::matchSortStrategyId(id, payload);
             }
